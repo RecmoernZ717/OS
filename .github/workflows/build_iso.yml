@@ -1095,6 +1095,7 @@ jobs:
 
               title="Alpine Sway Desktop OS"
               desc="Custom Alpine Linux OS with Sway, Waybar, Dock and GUI Installer"
+              modloop_sign=no
               arch="x86_64"
 
               apkovl="genapkovl-sway.sh"
