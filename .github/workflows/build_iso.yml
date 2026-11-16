@@ -64,7 +64,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Clone Alpine aports
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -82,7 +82,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Configure abuild signing keys
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -98,7 +98,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Create build directories
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -114,7 +114,7 @@ jobs:
       # ============================================================
 
       - name: Generate Sway configuration
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -227,7 +227,7 @@ jobs:
       # ============================================================
 
       - name: Generate Waybar configuration
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -322,7 +322,7 @@ jobs:
       # ============================================================
 
       - name: Generate dock configuration
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -337,7 +337,7 @@ jobs:
       # ============================================================
 
       - name: Generate Phase 1 installer
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -693,7 +693,7 @@ jobs:
       # ============================================================
 
       - name: Generate OOBE
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1088,7 +1088,7 @@ jobs:
       # ============================================================
 
       - name: Generate Alpine Sway image profile
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1176,7 +1176,7 @@ jobs:
       # ============================================================
 
       - name: Generate Alpine overlay
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1742,7 +1742,7 @@ jobs:
       # ============================================================
 
       - name: Validate generated scripts
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1761,7 +1761,7 @@ jobs:
       # ============================================================
 
       - name: Build Alpine Sway OS ISO
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1782,7 +1782,7 @@ jobs:
       # ============================================================
 
       - name: List build output
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
@@ -1796,7 +1796,7 @@ jobs:
       # ============================================================
 
       - name: Generate SHA256 checksums
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
