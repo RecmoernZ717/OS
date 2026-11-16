@@ -1753,6 +1753,16 @@ jobs:
           python3 -m py_compile \
             /tmp/os-files/installer/phase2-oobe.py
 
+      - name: Patch mkimage for current apk
+        run: |
+          set -eux
+
+          cd /tmp/aports
+
+          sed -i 's/add --initdb --no-chown/add --initdb/g' scripts/mkimage.sh
+
+          grep -n 'apk --arch.*--root.*add --initdb' scripts/mkimage.sh
+
       # ============================================================
       # BUILD ISO
       # ============================================================
