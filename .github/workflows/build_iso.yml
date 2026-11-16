@@ -54,6 +54,7 @@ jobs:
             grub-efi \
             mtools \
             openssh-client \
+            python3 \
             squashfs-tools \
             sudo \
             util-linux \
