@@ -33,7 +33,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Install ISO build dependencies
-        shell: /bin/sh
+        shell: sh
         run: |
           set -eux
 
