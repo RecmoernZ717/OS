@@ -70,11 +70,7 @@ jobs:
 
           rm -rf /tmp/aports
 
-          git clone \
-            --depth=1 \
-            https://gitlab.alpinelinux.org/alpine/aports.git \
-            /tmp/aports
-
+          git clone --depth=1 https://github.com/alpinelinux/aports.git /tmp/aports
           test -f /tmp/aports/scripts/mkimage.sh
 
       # ------------------------------------------------------------
