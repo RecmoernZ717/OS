@@ -59,6 +59,7 @@ jobs:
             bash \
             build-base \
             busybox \
+            ca-certificates \
             curl \
             dbus \
             dosfstools \
@@ -98,22 +99,68 @@ jobs:
             https://github.com/alpinelinux/aports.git \
             "$APORTS_DIR"
 
-          test -x "$APORTS_DIR/scripts/mkimage.sh"
+          test -x \
+            "$APORTS_DIR/scripts/mkimage.sh"
 
-          test -f "$APORTS_DIR/scripts/mkimg.base.sh"
+          test -f \
+            "$APORTS_DIR/scripts/mkimg.base.sh"
 
-          echo "Alpine aports ready."
+          echo "Alpine aports cloned successfully."
+
+
+      # ==========================================================
+      # FIX CURRENT APK / MKIMAGE COMPATIBILITY
+      #
+      # Current aports mkimage.sh contains:
+      #
+      # apk --arch "$ARCH" --root "$APKROOT" add --initdb --no-chown
+      #
+      # Remove --no-chown because current apk rejects that mode
+      # when mkimage is running as root.
+      # ==========================================================
+
+      - name: Patch mkimage apk compatibility
+        shell: sh
+        run: |
+          set -eux
+
+          MKIMAGE="$APORTS_DIR/scripts/mkimage.sh"
+
+          test -f "$MKIMAGE"
+
+          echo "Original mkimage invocation:"
+
+          grep -n \
+            -- "--initdb" \
+            "$MKIMAGE" || true
+
+          sed -i \
+            's/ add --initdb --no-chown/ add --initdb/g' \
+            "$MKIMAGE"
+
+          echo "Patched mkimage invocation:"
+
+          grep -n \
+            -- "--initdb" \
+            "$MKIMAGE"
+
+          if grep -q \
+            -- "--no-chown" \
+            "$MKIMAGE"; then
+
+            echo "ERROR: --no-chown is still present."
+
+            exit 1
+          fi
+
+          sh -n \
+            "$MKIMAGE"
+
+          echo "mkimage.sh compatibility patch passed."
 
 
       # ==========================================================
       # SIGNING KEY
-      #
-      # IMPORTANT:
-      # abuild-keygen creates the key under:
-      #
-      # $HOME/.config/abuild/
-      #
-      # NOT /root/.abuild/
       # ==========================================================
 
       - name: Create Alpine package signing key
@@ -137,7 +184,8 @@ jobs:
           echo "Searching for generated private key..."
 
           PRIVKEY="$(
-            find "$HOME/.config/abuild" \
+            find \
+              "$HOME/.config/abuild" \
               -maxdepth 1 \
               -type f \
               -name '*.rsa' \
@@ -146,36 +194,29 @@ jobs:
           )"
 
           test -n "$PRIVKEY"
-
           test -f "$PRIVKEY"
 
           PUBKEY="${PRIVKEY}.pub"
 
           test -f "$PUBKEY"
 
-          echo "Private key:"
+          echo "Private key found:"
           echo "$PRIVKEY"
 
-          echo "Public key:"
+          echo "Public key found:"
           echo "$PUBKEY"
-
-          export PACKAGER_PRIVKEY="$PRIVKEY"
-          export PACKAGER_PUBKEY="$PUBKEY"
-
-          echo "PACKAGER_PRIVKEY=$PACKAGER_PRIVKEY" >> "$GITHUB_ENV"
-          echo "PACKAGER_PUBKEY=$PACKAGER_PUBKEY" >> "$GITHUB_ENV"
 
           cp \
             "$PUBKEY" \
             /etc/apk/keys/
 
+          echo "PACKAGER_PRIVKEY=$PRIVKEY" \
+            >> "$GITHUB_ENV"
+
+          echo "PACKAGER_PUBKEY=$PUBKEY" \
+            >> "$GITHUB_ENV"
+
           echo "Signing key configured."
-
-          ls -l \
-            "$PRIVKEY"
-
-          ls -l \
-            "$PUBKEY"
 
 
       # ==========================================================
@@ -187,7 +228,8 @@ jobs:
         run: |
           set -eux
 
-          rm -rf "$OS_FILES"
+          rm -rf \
+            "$OS_FILES"
 
           mkdir -p \
             "$OS_FILES/configs/sway" \
@@ -208,36 +250,29 @@ jobs:
           set $mod Mod4
 
           set $term foot
-
           set $menu wofi --show drun
 
           output * bg #1e1e2e solid_color
 
-          # Terminal
           bindsym $mod+Return exec $term
 
-          # Application launcher
           bindsym $mod+d exec $menu
 
-          # Window controls
           bindsym $mod+Shift+q kill
           bindsym $mod+Shift+c reload
           bindsym $mod+f fullscreen
           bindsym $mod+Shift+space floating toggle
 
-          # Focus
           bindsym $mod+Left focus left
           bindsym $mod+Down focus down
           bindsym $mod+Up focus up
           bindsym $mod+Right focus right
 
-          # Move windows
           bindsym $mod+Shift+Left move left
           bindsym $mod+Shift+Down move down
           bindsym $mod+Shift+Up move up
           bindsym $mod+Shift+Right move right
 
-          # Workspaces
           bindsym $mod+1 workspace number 1
           bindsym $mod+2 workspace number 2
           bindsym $mod+3 workspace number 3
@@ -250,7 +285,6 @@ jobs:
           bindsym $mod+Shift+4 move container to workspace number 4
           bindsym $mod+Shift+5 move container to workspace number 5
 
-          # Gaps
           gaps inner 8
           gaps outer 4
 
@@ -258,13 +292,8 @@ jobs:
 
           default_border pixel 2
 
-          # Waybar
           exec_always waybar
-
-          # Notifications
           exec mako
-
-          # Network manager applet
           exec nm-applet
           EOF
 
@@ -403,8 +432,8 @@ jobs:
                   )
 
                   self.set_default_size(
-                      650,
-                      480
+                      700,
+                      520
                   )
 
                   box = Gtk.Box(
@@ -429,7 +458,7 @@ jobs:
                   box.append(title)
 
                   subtitle = Gtk.Label(
-                      label="Select a disk to install Alpine Sway OS."
+                      label="Select the disk where Alpine Sway OS should be installed."
                   )
 
                   subtitle.set_halign(Gtk.Align.START)
@@ -441,7 +470,7 @@ jobs:
                   box.append(self.disk_combo)
 
                   warning = Gtk.Label(
-                      label="WARNING: The selected disk will be erased."
+                      label="WARNING: Installing to a disk will erase that disk."
                   )
 
                   warning.set_halign(Gtk.Align.START)
@@ -488,7 +517,10 @@ jobs:
                   scroll = Gtk.ScrolledWindow()
 
                   scroll.set_vexpand(True)
-                  scroll.set_child(self.log)
+
+                  scroll.set_child(
+                      self.log
+                  )
 
                   box.append(scroll)
 
@@ -498,6 +530,7 @@ jobs:
               def populate_disks(self):
 
                   try:
+
                       result = subprocess.check_output(
                           [
                               "lsblk",
@@ -509,7 +542,9 @@ jobs:
                           text=True
                       )
 
-                      devices = json.loads(result)
+                      devices = json.loads(
+                          result
+                      )
 
                   except Exception as error:
 
@@ -580,6 +615,7 @@ jobs:
                       self.status.set_text(
                           "Select a disk first."
                       )
+
                       return
 
                   self.install_button.set_sensitive(
@@ -671,6 +707,7 @@ jobs:
           class InstallerApp(Gtk.Application):
 
               def __init__(self):
+
                   super().__init__(
                       application_id="org.alpine.sway.installer"
                   )
@@ -722,6 +759,7 @@ jobs:
           class OOBEWindow(Gtk.ApplicationWindow):
 
               def __init__(self, app):
+
                   super().__init__(
                       application=app,
                       title="Welcome to Alpine Sway OS"
@@ -892,6 +930,7 @@ jobs:
           class OOBEApp(Gtk.Application):
 
               def __init__(self):
+
                   super().__init__(
                       application_id="org.alpine.sway.oobe"
                   )
@@ -940,13 +979,15 @@ jobs:
 
               image_name="alpine-sway"
 
+              image_ext="iso"
+
               output_format="iso"
 
-              # The APK repository is signed.
-              # Do not require a separate modloop signing key.
-              modloop_sign=no
+              arch="x86_64"
 
-              kernel_cmdline="alpine_repo=auto"
+              # The APK index is signed, but do not ask update-kernel
+              # to create/sign a modloop with a private key.
+              modloop_sign=no
 
               apkovl="genapkovl-sway.sh"
 
@@ -964,7 +1005,6 @@ jobs:
                   mako
 
                   thunar
-                  thunar-volman
                   gvfs
                   gvfs-smb
 
@@ -1022,12 +1062,6 @@ jobs:
 
       # ==========================================================
       # ALPINE OVERLAY
-      #
-      # IMPORTANT:
-      # There is intentionally NO /etc/apk/repositories here.
-      #
-      # Alpine's initramfs discovers the ISO boot repository using
-      # /apks/.boot_repository.
       # ==========================================================
 
       - name: Generate Alpine overlay
@@ -1064,7 +1098,7 @@ jobs:
 
 
           # ========================================================
-          # SWAY CONFIG
+          # SWAY
           # ========================================================
 
           cp \
@@ -1116,14 +1150,16 @@ jobs:
           # HOSTNAME
           # ========================================================
 
-          printf '%s\n' "$HOSTNAME" \
+          printf '%s\n' \
+              "$HOSTNAME" \
               > "$tmp/etc/hostname"
 
 
           # ========================================================
           # APK WORLD
           #
-          # Only packages that are actually part of the image.
+          # Keep this limited to packages actually intended for
+          # the installed system.
           # ========================================================
 
           cat > "$tmp/etc/apk/world" <<'WORLD'
@@ -1153,7 +1189,7 @@ jobs:
 
 
           # ========================================================
-          # INSTALLER BACKEND
+          # PHASE 1 BACKEND
           # ========================================================
 
           cat > "$tmp/usr/local/bin/phase1-backend" <<'PHASE1'
@@ -1192,7 +1228,7 @@ jobs:
           SSHDOPTS="none"
           NTPOPTS="chrony"
           DISKOPTS="-m sys $TARGET"
-          ANSWERS
+          ANSWARES
 
           setup-alpine \
               -f /tmp/setup-answers
@@ -1227,7 +1263,8 @@ jobs:
               exit 1
           fi
 
-          printf '%s\n' "$HOSTNAME" \
+          printf '%s\n' \
+              "$HOSTNAME" \
               > /etc/hostname
 
 
@@ -1303,7 +1340,7 @@ jobs:
 
 
           # ========================================================
-          # OOBE PROGRAM
+          # OOBE
           # ========================================================
 
           cp \
@@ -1315,7 +1352,9 @@ jobs:
 
 
           # ========================================================
-          # INITTAB
+          # INIT
+          #
+          # Keep Alpine's normal OpenRC init structure.
           # ========================================================
 
           cat > "$tmp/etc/inittab" <<'INITTAB'
@@ -1358,11 +1397,10 @@ jobs:
           # ========================================================
           # IMPORTANT:
           #
-          # DO NOT CREATE:
+          # Do NOT overwrite /etc/apk/repositories here.
           #
-          # /etc/apk/repositories
-          #
-          # The Alpine initramfs will use the ISO boot repository.
+          # mkimage creates the ISO boot repository and
+          # /apks/.boot_repository.
           # ========================================================
 
 
@@ -1377,7 +1415,6 @@ jobs:
               etc \
               root \
               usr
-
           EOF
 
           chmod +x \
@@ -1385,10 +1422,31 @@ jobs:
 
 
       # ==========================================================
-      # VALIDATE GENERATED SCRIPTS
+      # FIX TYPO / VALIDATE OVERLAY
       # ==========================================================
 
-      - name: Validate generated files
+      - name: Validate generated overlay
+        shell: sh
+        run: |
+          set -eux
+
+          # The generated script must be valid shell.
+          sh -n \
+            "$APORTS_DIR/scripts/genapkovl-sway.sh"
+
+          # Catch accidental broken heredoc content.
+          grep -n \
+            "ANSWERS" \
+            "$APORTS_DIR/scripts/genapkovl-sway.sh"
+
+          echo "Overlay syntax is valid."
+
+
+      # ==========================================================
+      # PYTHON + SHELL VALIDATION
+      # ==========================================================
+
+      - name: Validate generated scripts
         shell: sh
         run: |
           set -eux
@@ -1417,11 +1475,11 @@ jobs:
           sh -n \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
-          echo "All generated scripts passed validation."
+          echo "All generated files passed validation."
 
 
       # ==========================================================
-      # VALIDATE SIGNING
+      # SIGNING VALIDATION
       # ==========================================================
 
       - name: Validate signing configuration
@@ -1482,13 +1540,15 @@ jobs:
 
           echo "Generated files:"
 
-          find "$ISO_OUT" \
+          find \
+            "$ISO_OUT" \
             -maxdepth 2 \
             -type f \
             -print
 
           ISO_FILE="$(
-            find "$ISO_OUT" \
+            find \
+              "$ISO_OUT" \
               -maxdepth 1 \
               -type f \
               -name '*.iso' \
@@ -1499,7 +1559,8 @@ jobs:
           test -n "$ISO_FILE"
           test -f "$ISO_FILE"
 
-          echo "ISO_FILE=$ISO_FILE" >> "$GITHUB_ENV"
+          echo "ISO_FILE=$ISO_FILE" \
+            >> "$GITHUB_ENV"
 
           ls -lh \
             "$ISO_FILE"
@@ -1507,9 +1568,6 @@ jobs:
 
       # ==========================================================
       # VERIFY ISO BOOT REPOSITORY
-      #
-      # This is specifically designed to catch the problem shown
-      # in your VirtualBox screenshot.
       # ==========================================================
 
       - name: Verify ISO boot repository
@@ -1517,7 +1575,8 @@ jobs:
         run: |
           set -eux
 
-          test -f "$ISO_FILE"
+          test -f \
+            "$ISO_FILE"
 
           MOUNT_DIR="/tmp/iso-check"
 
@@ -1548,7 +1607,7 @@ jobs:
 
 
           # --------------------------------------------------------
-          # /apks
+          # APK DIRECTORY
           # --------------------------------------------------------
 
           test -d \
@@ -1556,21 +1615,21 @@ jobs:
 
 
           # --------------------------------------------------------
-          # .boot_repository
+          # BOOT REPOSITORY MARKER
           # --------------------------------------------------------
 
           test -f \
             "$MOUNT_DIR/apks/.boot_repository"
 
 
-          echo "Boot repository:"
+          echo "Boot repository marker:"
 
           cat \
             "$MOUNT_DIR/apks/.boot_repository"
 
 
           # --------------------------------------------------------
-          # x86_64 repository
+          # X86_64 APK REPOSITORY
           # --------------------------------------------------------
 
           test -d \
@@ -1581,12 +1640,11 @@ jobs:
 
 
           # --------------------------------------------------------
-          # Boot directory
+          # BOOT FILES
           # --------------------------------------------------------
 
           test -d \
             "$MOUNT_DIR/apks/boot"
-
 
           echo "Boot files:"
 
@@ -1598,7 +1656,7 @@ jobs:
 
 
           # --------------------------------------------------------
-          # APK signatures
+          # APK SIGNATURES
           # --------------------------------------------------------
 
           echo "Repository signatures:"
