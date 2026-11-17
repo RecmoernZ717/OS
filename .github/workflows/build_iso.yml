@@ -861,7 +861,7 @@ jobs:
         run: |
           set -eux
 
-          find "$GITHUB_WORKSPACE/$OUTDIR" -maxdepth 2 -type f -ls
+          find "$GITHUB_WORKSPACE/$OUTDIR" -maxdepth 2 -type f -exec ls -l {} +
 
           ISO="$(find "$GITHUB_WORKSPACE/$OUTDIR" -type f -name '*.iso' | head -n 1)"
           [ -n "$ISO" ] || { echo "ERROR: No ISO was generated."; exit 1; }
