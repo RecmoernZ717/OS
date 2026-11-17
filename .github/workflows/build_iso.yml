@@ -839,9 +839,11 @@ jobs:
         shell: sh
         run: |
           set -eux
-
           mkdir -p "$GITHUB_WORKSPACE/$OUTDIR"
           cd /tmp/aports
+
+          export SWAY_OVERLAY=/tmp/sway-overlay
+          # PACKAGER_PRIVKEY / PACKAGER_PUBKEY are already in the environment
 
           sh scripts/mkimage.sh \
             --tag edge \
