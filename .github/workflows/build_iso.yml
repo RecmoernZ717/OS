@@ -6,14 +6,19 @@ on:
       - main
     tags:
       - "v*"
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
+
 jobs:
+
   build-iso:
+
     name: Build Alpine Sway OS ISO
+
     runs-on: ubuntu-latest
 
     container:
@@ -24,6 +29,7 @@ jobs:
       APORTS_DIR: /tmp/aports
       OS_FILES: /tmp/os-files
       ISO_OUT: /workspace/out
+
 
     steps:
 
@@ -77,7 +83,7 @@ jobs:
 
 
       # ==========================================================
-      # APORTS
+      # CLONE APORTS
       # ==========================================================
 
       - name: Clone Alpine aports
@@ -101,6 +107,13 @@ jobs:
 
       # ==========================================================
       # SIGNING KEY
+      #
+      # IMPORTANT:
+      # abuild-keygen creates the key under:
+      #
+      # $HOME/.config/abuild/
+      #
+      # NOT /root/.abuild/
       # ==========================================================
 
       - name: Create Alpine package signing key
@@ -108,85 +121,65 @@ jobs:
         run: |
           set -eux
 
-          mkdir -p /root/.abuild
-          mkdir -p /etc/apk/keys
+          export HOME="${HOME:-/github/home}"
+
+          mkdir -p \
+            "$HOME/.config/abuild"
+
+          mkdir -p \
+            /etc/apk/keys
 
           abuild-keygen \
             -a \
             -i \
             -n
 
-          PRIVKEY=""
+          echo "Searching for generated private key..."
 
-          if [ -f /root/.abuild/abuild.conf ]; then
-            PRIVKEY="$(
-              sed -n \
-                's/^PACKAGER_PRIVKEY="\(.*\)"/\1/p' \
-                /root/.abuild/abuild.conf \
-                | head -n 1
-            )"
-          fi
-
-          if [ -z "$PRIVKEY" ]; then
-            PRIVKEY="$(
-              find /root/.abuild \
-                -maxdepth 1 \
-                -type f \
-                -name '*.rsa' \
-                -print \
-                | head -n 1
-            )"
-          fi
+          PRIVKEY="$(
+            find "$HOME/.config/abuild" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.rsa' \
+              -print \
+              | head -n 1
+          )"
 
           test -n "$PRIVKEY"
+
           test -f "$PRIVKEY"
-          test -f "${PRIVKEY}.pub"
+
+          PUBKEY="${PRIVKEY}.pub"
+
+          test -f "$PUBKEY"
+
+          echo "Private key:"
+          echo "$PRIVKEY"
+
+          echo "Public key:"
+          echo "$PUBKEY"
 
           export PACKAGER_PRIVKEY="$PRIVKEY"
-          export PACKAGER_PUBKEY="${PRIVKEY}.pub"
+          export PACKAGER_PUBKEY="$PUBKEY"
 
           echo "PACKAGER_PRIVKEY=$PACKAGER_PRIVKEY" >> "$GITHUB_ENV"
           echo "PACKAGER_PUBKEY=$PACKAGER_PUBKEY" >> "$GITHUB_ENV"
 
           cp \
-            "$PACKAGER_PUBKEY" \
+            "$PUBKEY" \
             /etc/apk/keys/
 
-          echo "Private key:"
-          echo "$PACKAGER_PRIVKEY"
+          echo "Signing key configured."
 
-          echo "Public key:"
-          echo "$PACKAGER_PUBKEY"
+          ls -l \
+            "$PRIVKEY"
 
-
-      # ==========================================================
-      # PATCH MKIMAGE FOR APK ROOT MODE
-      # ==========================================================
-
-      - name: Patch mkimage apk compatibility
-        shell: sh
-        run: |
-          set -eux
-
-          cd "$APORTS_DIR"
-
-          sed -i \
-            's/add --initdb --no-chown/add --initdb/g' \
-            scripts/mkimage.sh
-
-          if grep -q -- '--initdb --no-chown' scripts/mkimage.sh; then
-            echo "mkimage.sh still contains --no-chown"
-            exit 1
-          fi
-
-          chmod +x \
-            scripts/mkimage.sh
-
-          echo "mkimage.sh patched."
+          ls -l \
+            "$PUBKEY"
 
 
       # ==========================================================
-      # CREATE SOURCE FILE TREE
+      # CREATE OS FILE TREE
       # ==========================================================
 
       - name: Create OS file tree
@@ -203,7 +196,7 @@ jobs:
 
 
       # ==========================================================
-      # SWAY
+      # SWAY CONFIG
       # ==========================================================
 
       - name: Generate Sway configuration
@@ -213,7 +206,9 @@ jobs:
 
           cat > "$OS_FILES/configs/sway/config" <<'EOF'
           set $mod Mod4
+
           set $term foot
+
           set $menu wofi --show drun
 
           output * bg #1e1e2e solid_color
@@ -221,7 +216,7 @@ jobs:
           # Terminal
           bindsym $mod+Return exec $term
 
-          # Launcher
+          # Application launcher
           bindsym $mod+d exec $menu
 
           # Window controls
@@ -236,7 +231,7 @@ jobs:
           bindsym $mod+Up focus up
           bindsym $mod+Right focus right
 
-          # Move
+          # Move windows
           bindsym $mod+Shift+Left move left
           bindsym $mod+Shift+Down move down
           bindsym $mod+Shift+Up move up
@@ -261,7 +256,6 @@ jobs:
 
           floating_modifier $mod normal
 
-          # Border
           default_border pixel 2
 
           # Waybar
@@ -270,7 +264,7 @@ jobs:
           # Notifications
           exec mako
 
-          # Network applet
+          # Network manager applet
           exec nm-applet
           EOF
 
@@ -337,6 +331,7 @@ jobs:
           }
           EOF
 
+
           cat > "$OS_FILES/configs/waybar/style.css" <<'EOF'
           * {
               font-family: "JetBrains Mono", monospace;
@@ -380,7 +375,7 @@ jobs:
       # PHASE 1 INSTALLER
       # ==========================================================
 
-      - name: Generate installer
+      - name: Generate Phase 1 installer
         shell: sh
         run: |
           set -eux
@@ -391,6 +386,7 @@ jobs:
           import json
           import subprocess
           import threading
+
           import gi
 
           gi.require_version("Gtk", "4.0")
@@ -406,7 +402,10 @@ jobs:
                       title="Alpine Sway OS Installer"
                   )
 
-                  self.set_default_size(650, 480)
+                  self.set_default_size(
+                      650,
+                      480
+                  )
 
                   box = Gtk.Box(
                       orientation=Gtk.Orientation.VERTICAL,
@@ -513,9 +512,11 @@ jobs:
                       devices = json.loads(result)
 
                   except Exception as error:
+
                       self.status.set_text(
                           f"Disk detection failed: {error}"
                       )
+
                       return
 
                   for device in devices.get(
@@ -532,7 +533,11 @@ jobs:
                           continue
 
                       if name.startswith(
-                          ("loop", "ram", "sr")
+                          (
+                              "loop",
+                              "ram",
+                              "sr"
+                          )
                       ):
                           continue
 
@@ -606,16 +611,18 @@ jobs:
                           text=True
                       )
 
-                      for line in process.stdout:
+                      if process.stdout:
 
-                          GLib.idle_add(
-                              self.add_log,
-                              line.rstrip()
-                          )
+                          for line in process.stdout:
 
-                          GLib.idle_add(
-                              self.progress.pulse
-                          )
+                              GLib.idle_add(
+                                  self.add_log,
+                                  line.rstrip()
+                              )
+
+                              GLib.idle_add(
+                                  self.progress.pulse
+                              )
 
                       process.wait()
 
@@ -704,6 +711,7 @@ jobs:
 
           import subprocess
           import threading
+
           import gi
 
           gi.require_version("Gtk", "4.0")
@@ -837,7 +845,10 @@ jobs:
                       .strip()
                   )
 
-                  if not username or not password:
+                  if not username:
+                      return
+
+                  if not password:
                       return
 
                   if not hostname:
@@ -908,7 +919,7 @@ jobs:
 
 
       # ==========================================================
-      # MKIMAGE PROFILE
+      # SWAY IMAGE PROFILE
       # ==========================================================
 
       - name: Generate Sway image profile
@@ -931,11 +942,10 @@ jobs:
 
               output_format="iso"
 
-              # Do not sign the kernel modloop.
-              # The APK repository is still signed.
+              # The APK repository is signed.
+              # Do not require a separate modloop signing key.
               modloop_sign=no
 
-              # Explicitly use the ISO boot repository.
               kernel_cmdline="alpine_repo=auto"
 
               apkovl="genapkovl-sway.sh"
@@ -1011,12 +1021,13 @@ jobs:
 
 
       # ==========================================================
-      # APOKVL
+      # ALPINE OVERLAY
       #
       # IMPORTANT:
-      # Do NOT create /etc/apk/repositories here.
-      # Alpine initramfs needs to discover the ISO's local
-      # .boot_repository and generate the correct repository path.
+      # There is intentionally NO /etc/apk/repositories here.
+      #
+      # Alpine's initramfs discovers the ISO boot repository using
+      # /apks/.boot_repository.
       # ==========================================================
 
       - name: Generate Alpine overlay
@@ -1039,47 +1050,47 @@ jobs:
 
 
           # ========================================================
-          # DESKTOP CONFIG
+          # DIRECTORIES
           # ========================================================
 
           mkdir -p \
+              "$tmp/etc" \
+              "$tmp/etc/apk" \
               "$tmp/etc/skel/.config/sway" \
-              "$tmp/etc/skel/.config/waybar"
+              "$tmp/etc/skel/.config/waybar" \
+              "$tmp/root/.config/sway" \
+              "$tmp/root/.config/waybar" \
+              "$tmp/usr/local/bin"
 
+
+          # ========================================================
+          # SWAY CONFIG
+          # ========================================================
 
           cp \
               /tmp/os-files/configs/sway/config \
               "$tmp/etc/skel/.config/sway/config"
-
-
-          cp \
-              /tmp/os-files/configs/waybar/config.jsonc \
-              "$tmp/etc/skel/.config/waybar/config.jsonc"
-
-
-          cp \
-              /tmp/os-files/configs/waybar/style.css \
-              "$tmp/etc/skel/.config/waybar/style.css"
-
-
-          # ========================================================
-          # ROOT CONFIG
-          # ========================================================
-
-          mkdir -p \
-              "$tmp/root/.config/sway" \
-              "$tmp/root/.config/waybar"
-
 
           cp \
               /tmp/os-files/configs/sway/config \
               "$tmp/root/.config/sway/config"
 
 
+          # ========================================================
+          # WAYBAR
+          # ========================================================
+
+          cp \
+              /tmp/os-files/configs/waybar/config.jsonc \
+              "$tmp/etc/skel/.config/waybar/config.jsonc"
+
+          cp \
+              /tmp/os-files/configs/waybar/style.css \
+              "$tmp/etc/skel/.config/waybar/style.css"
+
           cp \
               /tmp/os-files/configs/waybar/config.jsonc \
               "$tmp/root/.config/waybar/config.jsonc"
-
 
           cp \
               /tmp/os-files/configs/waybar/style.css \
@@ -1090,16 +1101,11 @@ jobs:
           # PROFILE
           # ========================================================
 
-          mkdir -p \
-              "$tmp/etc/skel"
-
-
           cat > "$tmp/etc/skel/.profile" <<'PROFILE'
           export XDG_CURRENT_DESKTOP=sway
           export XDG_SESSION_TYPE=wayland
           export MOZ_ENABLE_WAYLAND=1
           PROFILE
-
 
           cp \
               "$tmp/etc/skel/.profile" \
@@ -1115,12 +1121,40 @@ jobs:
 
 
           # ========================================================
-          # PHASE 1 BACKEND
+          # APK WORLD
+          #
+          # Only packages that are actually part of the image.
           # ========================================================
 
-          mkdir -p \
-              "$tmp/usr/local/bin"
+          cat > "$tmp/etc/apk/world" <<'WORLD'
+          alpine-base
+          sway
+          swaybg
+          swayidle
+          swaylock
+          waybar
+          wofi
+          foot
+          mako
+          thunar
+          firefox
+          flatpak
+          seatd
+          dbus
+          elogind
+          networkmanager
+          python3
+          py3-gobject3
+          gtk4.0
+          util-linux
+          e2fsprogs
+          dosfstools
+          WORLD
 
+
+          # ========================================================
+          # INSTALLER BACKEND
+          # ========================================================
 
           cat > "$tmp/usr/local/bin/phase1-backend" <<'PHASE1'
           #!/bin/sh
@@ -1155,7 +1189,7 @@ jobs:
           PROXYOPTS="none"
           APKREPOSOPTS="-1"
           USEROPTS="none"
-          SSHDOPTS="openssh"
+          SSHDOPTS="none"
           NTPOPTS="chrony"
           DISKOPTS="-m sys $TARGET"
           ANSWERS
@@ -1163,10 +1197,9 @@ jobs:
           setup-alpine \
               -f /tmp/setup-answers
 
-          echo "Installation finished."
-
           sync
 
+          echo "Installation finished."
           PHASE1
 
           chmod +x \
@@ -1174,7 +1207,7 @@ jobs:
 
 
           # ========================================================
-          # FINALIZE OOBE
+          # OOBE FINALIZER
           # ========================================================
 
           cat > "$tmp/usr/local/bin/finalize-oobe" <<'FINALIZE'
@@ -1186,7 +1219,6 @@ jobs:
           PASSWORD="$2"
           HOSTNAME="$3"
 
-
           if [ -z "$USERNAME" ]; then
               exit 1
           fi
@@ -1194,7 +1226,6 @@ jobs:
           if [ -z "$PASSWORD" ]; then
               exit 1
           fi
-
 
           printf '%s\n' "$HOSTNAME" \
               > /etc/hostname
@@ -1272,32 +1303,27 @@ jobs:
 
 
           # ========================================================
-          # OOBE PYTHON
+          # OOBE PROGRAM
           # ========================================================
 
           cp \
               /tmp/os-files/installer/phase2-oobe.py \
               "$tmp/usr/local/bin/phase2-oobe.py"
 
-
           chmod +x \
               "$tmp/usr/local/bin/phase2-oobe.py"
 
 
           # ========================================================
-          # LIVE ISO INIT
+          # INITTAB
           # ========================================================
-
-          mkdir -p \
-              "$tmp/etc"
-
 
           cat > "$tmp/etc/inittab" <<'INITTAB'
           ::sysinit:/sbin/openrc sysinit
           ::sysinit:/sbin/openrc boot
           ::wait:/sbin/openrc default
 
-          tty1::respawn:/bin/login -f root
+          tty1::respawn:/sbin/getty 38400 tty1
           tty2::respawn:/sbin/getty 38400 tty2
 
           ::ctrlaltdel:/sbin/reboot
@@ -1310,9 +1336,7 @@ jobs:
           # ========================================================
 
           mkdir -p \
-              "$tmp/etc/runlevels/default" \
-              "$tmp/etc/runlevels/boot" \
-              "$tmp/etc/runlevels/sysinit"
+              "$tmp/etc/runlevels/default"
 
 
           for service in \
@@ -1321,63 +1345,29 @@ jobs:
               NetworkManager; do
 
               if [ -e "/etc/init.d/$service" ]; then
+
                   ln -sf \
                       "/etc/init.d/$service" \
                       "$tmp/etc/runlevels/default/$service"
+
               fi
 
           done
 
 
           # ========================================================
-          # DO NOT CREATE /etc/apk/repositories
+          # IMPORTANT:
           #
-          # This is intentional.
+          # DO NOT CREATE:
           #
-          # Alpine's initramfs discovers:
+          # /etc/apk/repositories
           #
-          #   /apks/.boot_repository
-          #
-          # and generates the correct repository path itself.
+          # The Alpine initramfs will use the ISO boot repository.
           # ========================================================
 
 
           # ========================================================
-          # PACKAGE WORLD
-          # ========================================================
-
-          mkdir -p \
-              "$tmp/etc/apk"
-
-
-          cat > "$tmp/etc/apk/world" <<'WORLD'
-          alpine-base
-          sway
-          swaybg
-          swayidle
-          swaylock
-          waybar
-          wofi
-          foot
-          mako
-          thunar
-          firefox
-          flatpak
-          seatd
-          dbus
-          elogind
-          networkmanager
-          python3
-          py3-gobject3
-          gtk4.0
-          util-linux
-          e2fsprogs
-          dosfstools
-          WORLD
-
-
-          # ========================================================
-          # CREATE OVERLAY
+          # CREATE APOKVOL
           # ========================================================
 
           tar \
@@ -1395,7 +1385,7 @@ jobs:
 
 
       # ==========================================================
-      # VALIDATE SCRIPTS
+      # VALIDATE GENERATED SCRIPTS
       # ==========================================================
 
       - name: Validate generated files
@@ -1427,11 +1417,11 @@ jobs:
           sh -n \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
-          echo "Validation passed."
+          echo "All generated scripts passed validation."
 
 
       # ==========================================================
-      # CHECK SIGNING ENVIRONMENT
+      # VALIDATE SIGNING
       # ==========================================================
 
       - name: Validate signing configuration
@@ -1445,14 +1435,18 @@ jobs:
           test -f "$PACKAGER_PRIVKEY"
           test -f "$PACKAGER_PUBKEY"
 
-          test -f \
-            "/etc/apk/keys/$(basename "$PACKAGER_PUBKEY")"
+          KEY_NAME="$(basename "$PACKAGER_PUBKEY")"
 
-          echo "Signing configuration is valid."
+          test -f \
+            "/etc/apk/keys/$KEY_NAME"
+
+          echo "Private key exists."
+          echo "Public key exists."
+          echo "APK public key installed."
 
 
       # ==========================================================
-      # BUILD
+      # BUILD ISO
       # ==========================================================
 
       - name: Build Alpine Sway OS ISO
@@ -1460,7 +1454,8 @@ jobs:
         run: |
           set -eux
 
-          rm -rf "$ISO_OUT"
+          rm -rf \
+            "$ISO_OUT"
 
           mkdir -p \
             "$ISO_OUT"
@@ -1477,7 +1472,7 @@ jobs:
 
 
       # ==========================================================
-      # FIND ISO
+      # INSPECT OUTPUT
       # ==========================================================
 
       - name: Inspect ISO output
@@ -1485,10 +1480,12 @@ jobs:
         run: |
           set -eux
 
+          echo "Generated files:"
+
           find "$ISO_OUT" \
             -maxdepth 2 \
             -type f \
-            -printf '%p %s bytes\n'
+            -print
 
           ISO_FILE="$(
             find "$ISO_OUT" \
@@ -1504,14 +1501,15 @@ jobs:
 
           echo "ISO_FILE=$ISO_FILE" >> "$GITHUB_ENV"
 
-          ls -lh "$ISO_FILE"
+          ls -lh \
+            "$ISO_FILE"
 
 
       # ==========================================================
-      # VERIFY THE ISO BOOT REPOSITORY
+      # VERIFY ISO BOOT REPOSITORY
       #
-      # This catches the exact problem shown in the VirtualBox
-      # screenshot before the ISO is uploaded.
+      # This is specifically designed to catch the problem shown
+      # in your VirtualBox screenshot.
       # ==========================================================
 
       - name: Verify ISO boot repository
@@ -1519,11 +1517,12 @@ jobs:
         run: |
           set -eux
 
-          ISO_FILE="$ISO_FILE"
+          test -f "$ISO_FILE"
 
           MOUNT_DIR="/tmp/iso-check"
 
-          rm -rf "$MOUNT_DIR"
+          rm -rf \
+            "$MOUNT_DIR"
 
           mkdir -p \
             "$MOUNT_DIR"
@@ -1533,24 +1532,46 @@ jobs:
             "$ISO_FILE" \
             "$MOUNT_DIR"
 
-          trap 'umount "$MOUNT_DIR" 2>/dev/null || true' EXIT
+          cleanup() {
+              umount \
+                "$MOUNT_DIR" \
+                2>/dev/null || true
+          }
 
-          echo "ISO contents:"
+          trap cleanup EXIT
+
+
+          echo "ISO root:"
 
           ls -lah \
             "$MOUNT_DIR"
 
-          echo "Checking /apks..."
+
+          # --------------------------------------------------------
+          # /apks
+          # --------------------------------------------------------
 
           test -d \
             "$MOUNT_DIR/apks"
 
-          echo "Checking .boot_repository..."
+
+          # --------------------------------------------------------
+          # .boot_repository
+          # --------------------------------------------------------
 
           test -f \
             "$MOUNT_DIR/apks/.boot_repository"
 
-          echo "Checking x86_64 APK repository..."
+
+          echo "Boot repository:"
+
+          cat \
+            "$MOUNT_DIR/apks/.boot_repository"
+
+
+          # --------------------------------------------------------
+          # x86_64 repository
+          # --------------------------------------------------------
 
           test -d \
             "$MOUNT_DIR/apks/x86_64"
@@ -1558,10 +1579,16 @@ jobs:
           test -f \
             "$MOUNT_DIR/apks/x86_64/APKINDEX.tar.gz"
 
-          echo "Checking boot files..."
+
+          # --------------------------------------------------------
+          # Boot directory
+          # --------------------------------------------------------
 
           test -d \
             "$MOUNT_DIR/apks/boot"
+
+
+          echo "Boot files:"
 
           find \
             "$MOUNT_DIR/apks/boot" \
@@ -1569,7 +1596,12 @@ jobs:
             -type f \
             -print
 
-          echo "Checking APK signing files..."
+
+          # --------------------------------------------------------
+          # APK signatures
+          # --------------------------------------------------------
+
+          echo "Repository signatures:"
 
           find \
             "$MOUNT_DIR/apks/x86_64" \
@@ -1578,7 +1610,8 @@ jobs:
             -name '*.SIGN.RSA.*' \
             -print
 
-          echo "BOOT REPOSITORY VALID."
+
+          echo "ISO BOOT REPOSITORY VALID."
 
 
       # ==========================================================
@@ -1596,11 +1629,12 @@ jobs:
             "$(basename "$ISO_FILE")" \
             > sha256sums.txt
 
-          cat sha256sums.txt
+          cat \
+            sha256sums.txt
 
 
       # ==========================================================
-      # ARTIFACT
+      # UPLOAD ARTIFACT
       # ==========================================================
 
       - name: Upload ISO artifact
@@ -1614,7 +1648,7 @@ jobs:
 
 
       # ==========================================================
-      # RELEASE
+      # GITHUB RELEASE
       # ==========================================================
 
       - name: Create GitHub release
