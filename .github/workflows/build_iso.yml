@@ -164,6 +164,7 @@ jobs:
           pipewire
           pipewire-pulse
           wireplumber
+          pulseaudio
           pulseaudio-utils
 
           python3
@@ -243,6 +244,8 @@ jobs:
             "$TMP/etc/xdg/waybar" \
             "$TMP/etc/NetworkManager" \
             "$TMP/root" \
+            "$TMP/root/.config/sway" \
+            "$TMP/root/.config/sway" \
             "$TMP/usr/local/bin" \
             "$TMP/usr/local/sbin"
 
