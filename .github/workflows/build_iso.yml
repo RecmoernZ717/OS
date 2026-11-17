@@ -90,7 +90,6 @@ jobs:
           linux-lts
           wireless-regdb
           wpa_supplicant
-          rfkill
 
           linux-firmware-intel
           linux-firmware-rtlwifi
@@ -802,10 +801,22 @@ jobs:
       - name: Dry-run package resolution
         shell: sh
         run: |
-          set -eux
+          set -eu
           apk update
-          # Simulate only: confirms every package name exists without installing the desktop.
-          apk add --simulate $(tr '\n' ' ' < /tmp/sway-packages.txt) > /dev/null
+          # Check every package individually so ALL missing names are reported at once.
+          missing=""
+          while read -r pkg; do
+            [ -n "$pkg" ] || continue
+            if ! apk add --simulate "$pkg" > /dev/null 2>&1; then
+              echo "MISSING: $pkg"
+              missing="$missing $pkg"
+            fi
+          done < /tmp/sway-packages.txt
+          if [ -n "$missing" ]; then
+            echo "ERROR: packages not found on edge:$missing"
+            exit 1
+          fi
+          echo "All packages resolve."
 
       - name: Build Alpine ISO
         shell: sh
