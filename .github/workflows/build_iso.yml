@@ -65,26 +65,33 @@ jobs:
       - name: Create APK signing key
         shell: sh
         run: |
-          set -eux
-          mkdir -p /root/.abuild
+           set -eux
 
-          # Let abuild-keygen choose the filename itself
-          abuild-keygen -a -i -n -q
+           KEYDIR=/root/.abuild
+           mkdir -p "$KEYDIR" /etc/apk/keys
 
-          # Discover the key that was actually created
-          PRIVKEY=$(ls -1t /root/.abuild/*.rsa 2>/dev/null | head -n1)
-          [ -n "$PRIVKEY" ] || { echo "ERROR: no private key generated"; exit 1; }
-          PUBKEY="${PRIVKEY}.pub"
+           PRIVKEY="$KEYDIR/alpineos.rsa"
+           PUBKEY="$PRIVKEY.pub"
 
-          [ -f "$PUBKEY" ] || { echo "ERROR: public key missing: $PUBKEY"; exit 1; }
+           # Same operations abuild-keygen performs
+           umask 0007
+           openssl genrsa -out "$PRIVKEY" 4096
+           openssl rsa -in "$PRIVKEY" -pubout -out "$PUBKEY"
+           chmod 600 "$PRIVKEY"
+           chmod 644 "$PUBKEY"
 
-          # Make sure the pubkey is installed for --hostkeys
-          cp -f "$PUBKEY" /etc/apk/keys/
+           # Install public key so --hostkeys works
+           cp -f "$PUBKEY" /etc/apk/keys/
 
-          ls -l /root/.abuild/ /etc/apk/keys/
+           # Record for abuild / mkimage
+           cat > "$KEYDIR/abuild.conf" <<EOF
+           PACKAGER_PRIVKEY="$PRIVKEY"
+           EOF
 
-          echo "PACKAGER_PRIVKEY=$PRIVKEY" >> "$GITHUB_ENV"
-          echo "PACKAGER_PUBKEY=$PUBKEY"   >> "$GITHUB_ENV"
+           ls -l "$KEYDIR" /etc/apk/keys/
+
+           echo "PACKAGER_PRIVKEY=$PRIVKEY" >> "$GITHUB_ENV"
+           echo "PACKAGER_PUBKEY=$PUBKEY"   >> "$GITHUB_ENV"
 
       - name: Write package list
         shell: sh
