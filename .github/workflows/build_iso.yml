@@ -776,7 +776,7 @@ jobs:
               export WLR_NO_HARDWARE_CURSORS=1
               export XDG_CURRENT_DESKTOP=sway
               export XDG_SESSION_TYPE=wayland
-              exec dbus-run-session sway
+              exec dbus-run-session sway -c /root/.config/sway/config
           fi
           EOF
 
@@ -885,18 +885,18 @@ jobs:
           grep -F '::wait:/sbin/openrc default' /tmp/sway-overlay/etc/inittab
 
           # Ensure the Python installer is still automatically launched by Sway.
-          grep -F 'phase1-installer.py' /tmp/sway-overlay/etc/sway/config
-          grep -F 'GDK_BACKEND=x11' /tmp/sway-overlay/etc/sway/config
-          grep -F 'title="Alpine Sway OS Installer"' /tmp/sway-overlay/etc/sway/config
-          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/etc/sway/config
+          grep -F 'phase1-installer.py' /tmp/sway-overlay/root/.config/sway/config
+          grep -F 'GDK_BACKEND=wayland' /tmp/sway-overlay/root/.config/sway/config
+          grep -F 'title="Alpine Sway OS Installer"' /tmp/sway-overlay/root/.config/sway/config
+          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/root/.config/sway/config
 
           # Ensure the live image contains the compatibility and cursor packages.
           grep -Fx 'xwayland' /tmp/sway-packages.txt
           grep -Fx 'adwaita-icon-theme' /tmp/sway-packages.txt
           grep -Fx 'libinput' /tmp/sway-packages.txt
           grep -Fx 'libinput-tools' /tmp/sway-packages.txt
-          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/etc/sway/config
-          grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/etc/sway/config
+          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/root/.config/sway/config
+          grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/root/.config/sway/config
 
           python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
