@@ -68,13 +68,23 @@ jobs:
           set -eux
           mkdir -p /root/.abuild
 
-          export PACKAGER_PRIVKEY=/root/.abuild/alpineos.rsa
+          # Let abuild-keygen choose the filename itself
           abuild-keygen -a -i -n -q
+
+          # Discover the key that was actually created
+          PRIVKEY=$(ls -1t /root/.abuild/*.rsa 2>/dev/null | head -n1)
+          [ -n "$PRIVKEY" ] || { echo "ERROR: no private key generated"; exit 1; }
+          PUBKEY="${PRIVKEY}.pub"
+
+          [ -f "$PUBKEY" ] || { echo "ERROR: public key missing: $PUBKEY"; exit 1; }
+
+          # Make sure the pubkey is installed for --hostkeys
+          cp -f "$PUBKEY" /etc/apk/keys/
 
           ls -l /root/.abuild/ /etc/apk/keys/
 
-          echo "PACKAGER_PRIVKEY=/root/.abuild/alpineos.rsa" >> "$GITHUB_ENV"
-          echo "PACKAGER_PUBKEY=/root/.abuild/alpineos.rsa.pub" >> "$GITHUB_ENV"
+          echo "PACKAGER_PRIVKEY=$PRIVKEY" >> "$GITHUB_ENV"
+          echo "PACKAGER_PUBKEY=$PUBKEY"   >> "$GITHUB_ENV"
 
       - name: Write package list
         shell: sh
