@@ -16,103 +16,96 @@ jobs:
     container:
       image: alpine:edge
 
+    env:
+      OUTDIR: out
+
     steps:
       - name: Install build dependencies
         shell: sh
         run: |
           set -eux
-
           apk update
-
+          # nodejs is required so JS actions (checkout, upload-artifact,
+          # action-gh-release) can run inside the Alpine container.
           apk add --no-cache \
-            alpine-sdk \
+            abuild \
+            alpine-conf \
+            apk-tools \
             bash \
-            build-base \
             ca-certificates \
             curl \
+            dosfstools \
+            e2fsprogs \
+            fakeroot \
             git \
-            openssl \
-            squashfs-tools \
-            xorriso \
             grub \
             grub-bios \
             grub-efi \
+            mkinitfs \
             mtools \
-            dosfstools \
+            nodejs \
+            openssl \
+            squashfs-tools \
+            sudo \
+            syslinux \
+            tar \
             util-linux \
-            e2fsprogs \
-            python3 \
-            py3-gobject3 \
-            gtk4.0
+            xorriso
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare Alpine aports
+      - name: Clone Alpine aports
         shell: sh
         run: |
           set -eux
-
           rm -rf /tmp/aports
-
-          git clone --depth 1 \
-            https://github.com/alpinelinux/aports.git \
-            /tmp/aports
+          git clone --depth 1 https://github.com/alpinelinux/aports.git /tmp/aports
 
       - name: Create APK signing key
         shell: sh
         run: |
           set -eux
-
           mkdir -p /root/.abuild
-          mkdir -p /etc/apk/keys
-
-          if [ ! -f /root/.abuild/alpineos.rsa ]; then
-            abuild-keygen \
-              -a \
-              -n alpineos \
-              -i \
-              -q
-          fi
-
-          cp /root/.abuild/alpineos.rsa.pub /etc/apk/keys/
 
           export PACKAGER_PRIVKEY=/root/.abuild/alpineos.rsa
-          export PACKAGER_PUBKEY=/root/.abuild/alpineos.rsa.pub
+          abuild-keygen -a -i -n -q
+
+          ls -l /root/.abuild/ /etc/apk/keys/
 
           echo "PACKAGER_PRIVKEY=/root/.abuild/alpineos.rsa" >> "$GITHUB_ENV"
           echo "PACKAGER_PUBKEY=/root/.abuild/alpineos.rsa.pub" >> "$GITHUB_ENV"
 
-          ls -l /root/.abuild/
-          ls -l /etc/apk/keys/
-
-      - name: Create custom Sway profile
+      - name: Write package list
         shell: sh
         run: |
           set -eux
 
-          PROFILE="/tmp/aports/scripts/genapkovl-sway.sh"
-
-          mkdir -p "$(dirname "$PROFILE")"
-
-          cat > "$PROFILE" <<'PROFILE'
-          #!/bin/sh
-
-          profile_sway() {
-              profile_standard
-
-              title="Alpine Sway OS"
-              desc="Custom Alpine Linux Sway desktop ISO"
-
-              apks="
+          # Single source of truth: used for the ISO profile AND the live world file.
+          cat > /tmp/sway-packages.txt <<'EOF'
           alpine-base
           alpine-conf
-          alpine-sdk
           busybox
           openrc
           linux-lts
-          linux-firmware
           wireless-regdb
+          wpa_supplicant
+          rfkill
+
+          linux-firmware-intel
+          linux-firmware-rtlwifi
+          linux-firmware-rtl_bt
+          linux-firmware-rtw88
+          linux-firmware-rtw89
+          linux-firmware-ath10k
+          linux-firmware-ath11k
+          linux-firmware-brcm
+          linux-firmware-mediatek
+          linux-firmware-qca
+
+          eudev
+          udev-init-scripts
+          udev-init-scripts-openrc
 
           sway
           swaybg
@@ -120,20 +113,36 @@ jobs:
           swaylock
           waybar
           foot
+          xkeyboard-config
+          font-dejavu
+
+          mesa-dri-gallium
+          mesa-egl
+          mesa-gbm
+          mesa-gles
 
           dbus
           dbus-openrc
-          dbus-x11
-
           seatd
           seatd-openrc
-
           elogind
           elogind-openrc
 
           networkmanager
           networkmanager-cli
           networkmanager-openrc
+          networkmanager-wifi
+          networkmanager-tui
+          network-manager-applet
+
+          bluez
+          bluez-openrc
+          blueman
+
+          pipewire
+          pipewire-pulse
+          wireplumber
+          pulseaudio-utils
 
           python3
           py3-gobject3
@@ -144,82 +153,92 @@ jobs:
           dosfstools
           parted
 
+          sfdisk
+          syslinux
+          grub
+          grub-bios
+          grub-efi
+          efibootmgr
+          mkinitfs
+          doas
           bash
           curl
           wget
           git
           nano
           vim
-
           pciutils
           usbutils
+          EOF
 
-          "
+          # Drop blank lines
+          sed -i '/^[[:space:]]*$/d' /tmp/sway-packages.txt
+          sed -i 's/^[[:space:]]*//' /tmp/sway-packages.txt
 
-              initfs_features="ata base cdrom ext4 kms mmc nvme scsi usb"
+      - name: Create mkimage profile
+        shell: sh
+        run: |
+          set -eux
 
-              kernel_addons=""
+          # mkimage.sh only loads profiles from scripts/mkimg.<name>.sh
+          PROFILE=/tmp/aports/scripts/mkimg.sway.sh
 
-              boot_addons=""
+          {
+            cat <<'EOF'
+          profile_sway() {
+              profile_standard
 
-              modloop_sign="yes"
-
+              title="Alpine Sway OS"
+              desc="Custom Alpine Linux Sway desktop ISO"
+              profile_abbrev="sway"
+              kernel_flavors="lts"
               hostname="alpine-sway"
-
-              mkimg_squashfs_opts="-comp xz"
-
               apkovl="genapkovl-sway.sh"
+              apks="$apks
+          EOF
+            cat /tmp/sway-packages.txt
+            cat <<'EOF'
+              "
           }
+          EOF
+          } > "$PROFILE"
 
-          profile_sway
-          PROFILE
-
-          chmod +x "$PROFILE"
+          cat "$PROFILE"
 
       - name: Create Sway configuration overlay
         shell: sh
         run: |
           set -eux
 
-          TMP="/tmp/sway-overlay"
-
+          TMP=/tmp/sway-overlay
           rm -rf "$TMP"
-          mkdir -p "$TMP"
 
-          mkdir -p "$TMP/etc"
-          mkdir -p "$TMP/etc/profile.d"
-          mkdir -p "$TMP/etc/skel"
-          mkdir -p "$TMP/etc/sway"
-          mkdir -p "$TMP/etc/waybar"
-          mkdir -p "$TMP/etc/xdg"
-          mkdir -p "$TMP/etc/xdg/autostart"
-          mkdir -p "$TMP/root"
-          mkdir -p "$TMP/usr/local/bin"
-          mkdir -p "$TMP/usr/local/sbin"
-          mkdir -p "$TMP/etc/init.d"
-          mkdir -p "$TMP/etc/runlevels/default"
-          mkdir -p "$TMP/etc/network"
+          mkdir -p \
+            "$TMP/etc/apk" \
+            "$TMP/etc/profile.d" \
+            "$TMP/etc/skel" \
+            "$TMP/etc/sway" \
+            "$TMP/etc/xdg/waybar" \
+            "$TMP/etc/NetworkManager" \
+            "$TMP/root" \
+            "$TMP/usr/local/bin" \
+            "$TMP/usr/local/sbin"
 
-          # ------------------------------------------------------------
-          # Root profile
-          # ------------------------------------------------------------
-
-          cat > "$TMP/root/.profile" <<'PROFILE'
+          # ---------------- environment ----------------
+          cat > "$TMP/etc/profile.d/sway.sh" <<'EOF'
           export XDG_CURRENT_DESKTOP=sway
           export XDG_SESSION_TYPE=wayland
           export MOZ_ENABLE_WAYLAND=1
-          PROFILE
+          export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          EOF
+          chmod 644 "$TMP/etc/profile.d/sway.sh"
 
-          cp "$TMP/root/.profile" "$TMP/etc/skel/.profile"
-
-          # ------------------------------------------------------------
-          # Sway configuration
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/sway/config" <<'SWAY'
+          # ---------------- sway ----------------
+          cat > "$TMP/etc/sway/config" <<'EOF'
           set $mod Mod4
 
-          font pango:Sans 10
+          font pango:DejaVu Sans 10
 
           output * bg #202020 solid_color
 
@@ -234,15 +253,23 @@ jobs:
               accel_profile flat
           }
 
-          exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+          exec dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
 
           exec_always --no-startup-id waybar
+
+          # Tray applets for Wi-Fi and Bluetooth
+          exec nm-applet --indicator
+          exec blueman-applet
+
+          # Launch the installer automatically on start
+          exec python3 /usr/local/bin/phase1-installer.py
+          for_window [app_id="org.alpineos.installer"] floating enable, resize set 700 500, move position center
 
           bindsym $mod+Return exec foot
           bindsym $mod+d exec foot
           bindsym $mod+Shift+q kill
           bindsym $mod+Shift+c reload
-          bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit Sway?' -b 'Exit' 'swaymsg exit'
+          bindsym $mod+Shift+e exec swaynag -t warning -m 'Exit Sway?' -B 'Exit' 'swaymsg exit'
 
           bindsym $mod+1 workspace number 1
           bindsym $mod+2 workspace number 2
@@ -273,57 +300,37 @@ jobs:
           bindsym XF86AudioRaiseVolume exec pactl set-sink-volume @DEFAULT_SINK@ +5%
           bindsym XF86AudioLowerVolume exec pactl set-sink-volume @DEFAULT_SINK@ -5%
           bindsym XF86AudioMute exec pactl set-sink-mute @DEFAULT_SINK@ toggle
-          SWAY
+          EOF
 
-          # ------------------------------------------------------------
-          # Waybar
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/waybar/config" <<'WAYBAR'
+          # ---------------- waybar (system path is /etc/xdg/waybar) ----------------
+          cat > "$TMP/etc/xdg/waybar/config" <<'EOF'
           {
               "layer": "top",
               "position": "top",
               "height": 30,
-
-              "modules-left": [
-                  "sway/workspaces"
-              ],
-
-              "modules-center": [
-                  "clock"
-              ],
-
-              "modules-right": [
-                  "network",
-                  "cpu",
-                  "memory"
-              ],
-
-              "clock": {
-                  "format": "{:%Y-%m-%d %H:%M:%S}"
+              "modules-left": ["sway/workspaces"],
+              "modules-center": ["clock"],
+              "modules-right": ["tray", "bluetooth", "network", "cpu", "memory"],
+              "tray": { "spacing": 8 },
+              "bluetooth": {
+                  "format": "BT {status}",
+                  "format-connected": "BT {device_alias}",
+                  "format-disabled": "BT off",
+                  "on-click": "blueman-manager"
               },
-
-              "cpu": {
-                  "format": "CPU {usage}%"
-              },
-
-              "memory": {
-                  "format": "RAM {}%"
-              },
-
+              "clock": { "format": "{:%Y-%m-%d %H:%M:%S}" },
+              "cpu": { "format": "CPU {usage}%" },
+              "memory": { "format": "RAM {}%" },
               "network": {
                   "format-wifi": "WiFi {essid}",
                   "format-ethernet": "Ethernet",
-                  "format-disconnected": "Offline"
+                  "format-disconnected": "Offline",
+                  "on-click": "foot nmtui"
               }
           }
-          WAYBAR
+          EOF
 
-          # ------------------------------------------------------------
-          # Waybar CSS
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/waybar/style.css" <<'CSS'
+          cat > "$TMP/etc/xdg/waybar/style.css" <<'EOF'
           * {
               font-family: sans-serif;
               font-size: 13px;
@@ -339,489 +346,478 @@ jobs:
               color: white;
           }
 
-          #clock,
-          #cpu,
-          #memory,
-          #network {
+          #clock, #cpu, #memory, #network {
               padding: 0 10px;
           }
-          CSS
+          EOF
 
-          # ------------------------------------------------------------
-          # Login environment
-          # ------------------------------------------------------------
+          # ---------------- NetworkManager (correct path/case) ----------------
+          cat > "$TMP/etc/NetworkManager/NetworkManager.conf" <<'EOF'
+          [main]
+          plugins=keyfile
+          EOF
 
-          cat > "$TMP/etc/profile.d/sway.sh" <<'PROFILE'
-          export XDG_CURRENT_DESKTOP=sway
-          export XDG_SESSION_TYPE=wayland
-          export MOZ_ENABLE_WAYLAND=1
+          # ---------------- installer ----------------
+          cat > "$TMP/usr/local/sbin/phase1-backend" <<'EOF'
+          #!/bin/sh
+          # Alpine Sway OS install backend.
+          # Environment: DISK (e.g. /dev/sda), INSTALL_USER, INSTALL_PASS
+          set -eu
+
+          : "${DISK:?DISK not set}"
+          : "${INSTALL_USER:?INSTALL_USER not set}"
+          : "${INSTALL_PASS:?INSTALL_PASS not set}"
+
+          [ -b "$DISK" ] || { echo "ERROR: $DISK is not a block device"; exit 1; }
+
+          T=/mnt/target
+
+          cleanup() {
+              for m in dev proc sys; do umount -l "$T/$m" 2>/dev/null || true; done
+              umount "$T/boot/efi" 2>/dev/null || true
+              umount "$T/boot" 2>/dev/null || true
+              umount "$T" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          echo "==> [1/5] Partitioning $DISK and installing base system"
+          export ERASE_DISKS="$DISK"
+          setup-disk -m sys -s 0 "$DISK"
+
+          echo "==> [2/5] Mounting installed system"
+          ROOT_PART="$(lsblk -brnpo NAME,FSTYPE,SIZE "$DISK" \
+              | awk '$2=="ext4" {print $3, $1}' | sort -n | tail -n1 | cut -d' ' -f2)"
+          [ -n "$ROOT_PART" ] || { echo "ERROR: could not find root partition"; exit 1; }
+          echo "Root partition: $ROOT_PART"
+
+          mkdir -p "$T"
+          mount "$ROOT_PART" "$T"
+          mount --bind /dev "$T/dev"
+          mount -t proc proc "$T/proc"
+          mount -t sysfs sys "$T/sys"
+
+          echo "==> [3/5] Installing desktop packages"
+          sed 's/#.*//' /etc/apk/world | grep -v '^[[:space:]]*$' > /tmp/install-world
+          # shellcheck disable=SC2046
+          apk --root "$T" --repositories-file /etc/apk/repositories add \
+              $(tr '\n' ' ' < /tmp/install-world)
+
+          echo "==> [4/5] Applying configuration"
+          mkdir -p "$T/etc/sway" "$T/etc/xdg/waybar" "$T/etc/NetworkManager" "$T/etc/profile.d"
+
+          # The installed system must not relaunch the installer
+          grep -v -e 'phase1-installer' -e 'org.alpineos.installer' /etc/sway/config > "$T/etc/sway/config"
+          cp /etc/xdg/waybar/config "$T/etc/xdg/waybar/config"
+          cp /etc/xdg/waybar/style.css "$T/etc/xdg/waybar/style.css"
+          cp /etc/NetworkManager/NetworkManager.conf "$T/etc/NetworkManager/NetworkManager.conf"
+          cp /etc/profile.d/sway.sh "$T/etc/profile.d/sway.sh"
+
+          cat > "$T/etc/apk/repositories" <<REPOS
+          https://dl-cdn.alpinelinux.org/alpine/edge/main
+          https://dl-cdn.alpinelinux.org/alpine/edge/community
+          REPOS
+
+          echo "alpine-sway" > "$T/etc/hostname"
+
+          add_svc() {
+              chroot "$T" rc-update add "$1" "$2" >/dev/null 2>&1 || true
+          }
+          for s in devfs dmesg udev udev-trigger; do add_svc "$s" sysinit; done
+          for s in modules sysctl hostname bootmisc syslog; do add_svc "$s" boot; done
+          for s in dbus bluetooth seatd elogind networkmanager; do add_svc "$s" default; done
+          for s in mount-ro killprocs savecache; do add_svc "$s" shutdown; done
+
+          echo "==> [5/5] Creating user $INSTALL_USER"
+          chroot "$T" adduser -D -s /bin/bash "$INSTALL_USER"
+          printf '%s:%s\n' "$INSTALL_USER" "$INSTALL_PASS" | chroot "$T" chpasswd -c sha512
+          for g in wheel video input audio seat netdev plugdev; do
+              chroot "$T" addgroup "$INSTALL_USER" "$g" >/dev/null 2>&1 || true
+          done
+
+          mkdir -p "$T/etc/doas.d"
+          echo "permit persist :wheel" > "$T/etc/doas.d/wheel.conf"
+
+          # Start Sway automatically when the user logs in on tty1
+          cat > "$T/home/$INSTALL_USER/.profile" <<'PROFILE'
+          if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
+              export LIBSEAT_BACKEND=seatd
+              exec dbus-run-session sway
+          fi
           PROFILE
+          chroot "$T" chown "$INSTALL_USER:$INSTALL_USER" "/home/$INSTALL_USER/.profile"
 
-          chmod 644 "$TMP/etc/profile.d/sway.sh"
+          sync
+          echo "==> Installation complete"
+          EOF
+          chmod +x "$TMP/usr/local/sbin/phase1-backend"
 
-          # ------------------------------------------------------------
-          # Phase 1 installer
-          # ------------------------------------------------------------
-
-          cat > "$TMP/usr/local/bin/phase1-installer.py" <<'PY'
+          cat > "$TMP/usr/local/bin/phase1-installer.py" <<'EOF'
           #!/usr/bin/env python3
-
           import os
+          import re
           import subprocess
           import sys
+          import threading
 
           import gi
 
           gi.require_version("Gtk", "4.0")
-          from gi.repository import Gtk, GLib
+          from gi.repository import GLib, Gtk  # noqa: E402
+
+          BACKEND = "/usr/local/sbin/phase1-backend"
+
+
+          def list_disks():
+              """Return [(device, description)] for installable disks, excluding the live medium."""
+              live = set()
+              try:
+                  src = subprocess.run(
+                      ["findmnt", "-no", "SOURCE", "/media/cdrom"],
+                      capture_output=True, text=True, check=False,
+                  ).stdout.strip()
+                  if src:
+                      parent = subprocess.run(
+                          ["lsblk", "-no", "PKNAME", src],
+                          capture_output=True, text=True, check=False,
+                      ).stdout.strip()
+                      live.add(parent or os.path.basename(src))
+              except Exception:
+                  pass
+
+              out = subprocess.run(
+                  ["lsblk", "-dn", "-o", "NAME,SIZE,TYPE,MODEL"],
+                  capture_output=True, text=True, check=False,
+              ).stdout
+              disks = []
+              for line in out.splitlines():
+                  parts = line.split(None, 3)
+                  if len(parts) < 3 or parts[2] != "disk":
+                      continue
+                  name, size = parts[0], parts[1]
+                  if name in live or name.startswith(("loop", "ram", "zram")):
+                      continue
+                  model = parts[3].strip() if len(parts) > 3 else ""
+                  disks.append((f"/dev/{name}", f"/dev/{name} - {size} {model}".strip()))
+              return disks
 
 
           class Installer(Gtk.Application):
               def __init__(self):
-                  super().__init__(
-                      application_id="org.alpineos.installer"
-                  )
-
+                  super().__init__(application_id="org.alpineos.installer")
                   self.window = None
-                  self.status = None
-                  self.progress = None
+                  self.disks = []
+                  self.installing = False
+                  self.pulse_id = None
 
               def do_activate(self):
                   if self.window is not None:
                       self.window.present()
                       return
 
-                  self.window = Gtk.ApplicationWindow(
-                      application=self
-                  )
+                  self.window = Gtk.ApplicationWindow(application=self)
+                  self.window.set_title("Alpine Sway OS Installer")
+                  self.window.set_default_size(700, 560)
 
-                  self.window.set_title(
-                      "Alpine Sway OS Installer"
-                  )
+                  box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+                  for side in ("top", "bottom", "start", "end"):
+                      getattr(box, f"set_margin_{side}")(20)
 
-                  self.window.set_default_size(
-                      700,
-                      500
-                  )
-
-                  box = Gtk.Box(
-                      orientation=Gtk.Orientation.VERTICAL,
-                      spacing=12
-                  )
-
-                  box.set_margin_top(24)
-                  box.set_margin_bottom(24)
-                  box.set_margin_start(24)
-                  box.set_margin_end(24)
-
-                  title = Gtk.Label(
-                      label="Alpine Sway OS Installer"
-                  )
-
-                  title.set_markup(
-                      "<span size='xx-large'><b>"
-                      "Alpine Sway OS"
-                      "</b></span>"
-                  )
-
+                  title = Gtk.Label()
+                  title.set_markup("<span size='xx-large'><b>Alpine Sway OS</b></span>")
                   box.append(title)
 
-                  description = Gtk.Label(
-                      label=(
-                          "Select a disk and install "
-                          "the operating system."
-                      )
-                  )
+                  self.disks = list_disks()
+                  labels = [d[1] for d in self.disks] or ["No installable disks found"]
+                  box.append(Gtk.Label(label="Target disk (will be erased):", xalign=0))
+                  self.disk_dd = Gtk.DropDown.new_from_strings(labels)
+                  box.append(self.disk_dd)
 
-                  description.set_wrap(True)
+                  box.append(Gtk.Label(label="Username:", xalign=0))
+                  self.user_entry = Gtk.Entry()
+                  self.user_entry.set_text("user")
+                  box.append(self.user_entry)
 
-                  box.append(description)
+                  box.append(Gtk.Label(label="Password:", xalign=0))
+                  self.pass_entry = Gtk.PasswordEntry()
+                  self.pass_entry.set_show_peek_icon(True)
+                  box.append(self.pass_entry)
 
-                  self.status = Gtk.Label(
-                      label="Detecting disks..."
-                  )
+                  box.append(Gtk.Label(label="Confirm password:", xalign=0))
+                  self.pass2_entry = Gtk.PasswordEntry()
+                  self.pass2_entry.set_show_peek_icon(True)
+                  box.append(self.pass2_entry)
 
-                  box.append(self.status)
+                  self.install_btn = Gtk.Button(label="Install")
+                  self.install_btn.add_css_class("suggested-action")
+                  self.install_btn.connect("clicked", self.on_install_clicked)
+                  self.install_btn.set_sensitive(bool(self.disks))
+                  box.append(self.install_btn)
 
                   self.progress = Gtk.ProgressBar()
-
                   box.append(self.progress)
 
-                  install_button = Gtk.Button(
-                      label="Install"
-                  )
+                  self.status = Gtk.Label(label="Ready.", xalign=0)
+                  self.status.set_wrap(True)
+                  box.append(self.status)
 
-                  install_button.connect(
-                      "clicked",
-                      self.install
-                  )
+                  self.log = Gtk.TextView()
+                  self.log.set_editable(False)
+                  self.log.set_monospace(True)
+                  self.log.set_cursor_visible(False)
+                  scroll = Gtk.ScrolledWindow()
+                  scroll.set_vexpand(True)
+                  scroll.set_child(self.log)
+                  box.append(scroll)
 
-                  box.append(install_button)
+                  self.reboot_btn = Gtk.Button(label="Reboot")
+                  self.reboot_btn.set_visible(False)
+                  self.reboot_btn.connect("clicked", lambda _b: subprocess.Popen(["reboot"]))
+                  box.append(self.reboot_btn)
 
                   self.window.set_child(box)
                   self.window.present()
 
-                  self.detect_disks()
+              # ---- helpers ----
+              def set_status(self, text):
+                  self.status.set_text(text)
 
-              def detect_disks(self):
-                  try:
-                      result = subprocess.run(
-                          [
-                              "lsblk",
-                              "-dn",
-                              "-o",
-                              "NAME,SIZE,TYPE"
-                          ],
-                          capture_output=True,
-                          text=True,
-                          check=False
-                      )
+              def append_log(self, text):
+                  buf = self.log.get_buffer()
+                  buf.insert(buf.get_end_iter(), text)
+                  mark = buf.create_mark(None, buf.get_end_iter(), False)
+                  self.log.scroll_to_mark(mark, 0.0, False, 0.0, 0.0)
+                  return False
 
-                      lines = []
+              def set_busy(self, busy):
+                  self.installing = busy
+                  for w in (self.install_btn, self.disk_dd, self.user_entry,
+                            self.pass_entry, self.pass2_entry):
+                      w.set_sensitive(not busy)
+                  if busy:
+                      self.pulse_id = GLib.timeout_add(150, self.pulse)
+                  elif self.pulse_id:
+                      GLib.source_remove(self.pulse_id)
+                      self.pulse_id = None
 
-                      for line in result.stdout.splitlines():
-                          parts = line.split()
+              def pulse(self):
+                  self.progress.pulse()
+                  return True
 
-                          if len(parts) >= 3:
-                              name = parts[0]
-                              size = parts[1]
-                              device_type = parts[2]
+              # ---- install flow ----
+              def on_install_clicked(self, _button):
+                  user = self.user_entry.get_text().strip()
+                  pw = self.pass_entry.get_text()
+                  pw2 = self.pass2_entry.get_text()
 
-                              if device_type == "disk":
-                                  lines.append(
-                                      f"/dev/{name} - {size}"
-                                  )
-
-                      if lines:
-                          self.status.set_text(
-                              "Available disks:\n" +
-                              "\n".join(lines)
-                          )
-                      else:
-                          self.status.set_text(
-                              "No disks detected."
-                          )
-
-                  except Exception as exc:
-                      self.status.set_text(
-                          f"Disk detection failed: {exc}"
-                      )
-
-              def install(self, _button):
-                  dialog = Gtk.MessageDialog(
-                      transient_for=self.window,
-                      modal=True,
-                      message_type=Gtk.MessageType.WARNING,
-                      buttons=Gtk.ButtonsType.OK_CANCEL,
-                      text="Install Alpine Sway OS?"
-                  )
-
-                  dialog.set_secondary_text(
-                      "This will erase the selected target disk."
-                  )
-
-                  dialog.connect(
-                      "response",
-                      self.install_response
-                  )
-
-                  dialog.present()
-
-              def install_response(self, dialog, response):
-                  dialog.destroy()
-
-                  if response != Gtk.ResponseType.OK:
+                  if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", user):
+                      self.set_status("Invalid username (lowercase letters, digits, - and _ only).")
+                      return
+                  if not pw:
+                      self.set_status("Password cannot be empty.")
+                      return
+                  if pw != pw2:
+                      self.set_status("Passwords do not match.")
+                      return
+                  if not self.disks:
+                      self.set_status("No installable disk available.")
                       return
 
-                  self.status.set_text(
-                      "Starting installer..."
+                  disk = self.disks[self.disk_dd.get_selected()][0]
+
+                  dialog = Gtk.AlertDialog()
+                  dialog.set_message(f"Erase {disk} and install Alpine Sway OS?")
+                  dialog.set_detail("ALL DATA ON THIS DISK WILL BE LOST.")
+                  dialog.set_buttons(["Cancel", "Erase and install"])
+                  dialog.set_cancel_button(0)
+                  dialog.set_default_button(0)
+                  dialog.choose(
+                      self.window, None,
+                      lambda d, r: self.on_confirm(d, r, disk, user, pw),
                   )
 
-                  self.progress.set_fraction(0.1)
-
-                  GLib.idle_add(
-                      self.run_backend
-                  )
-
-              def run_backend(self):
+              def on_confirm(self, dialog, result, disk, user, pw):
                   try:
-                      result = subprocess.run(
-                          [
-                              "/usr/local/sbin/phase1-backend"
-                          ],
-                          capture_output=True,
-                          text=True,
-                          check=False
+                      choice = dialog.choose_finish(result)
+                  except Exception:
+                      return
+                  if choice != 1:
+                      return
+
+                  self.set_busy(True)
+                  self.reboot_btn.set_visible(False)
+                  self.set_status(f"Installing to {disk}... this can take several minutes.")
+                  env = dict(os.environ, DISK=disk, INSTALL_USER=user, INSTALL_PASS=pw)
+                  threading.Thread(target=self.run_backend, args=(env,), daemon=True).start()
+
+              def run_backend(self, env):
+                  code = 1
+                  try:
+                      proc = subprocess.Popen(
+                          [BACKEND], env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                       )
-
-                      if result.returncode == 0:
-                          self.progress.set_fraction(1.0)
-
-                          self.status.set_text(
-                              "Installation completed. "
-                              "Reboot and remove the ISO."
-                          )
-                      else:
-                          self.status.set_text(
-                              "Installation failed:\n" +
-                              result.stderr[-1000:]
-                          )
-
+                      for line in proc.stdout:
+                          GLib.idle_add(self.append_log, line)
+                          if line.startswith("==>"):
+                              GLib.idle_add(self.set_status, line.strip("=> \n"))
+                      code = proc.wait()
                   except Exception as exc:
-                      self.status.set_text(
-                          f"Installer error: {exc}"
-                      )
+                      GLib.idle_add(self.append_log, f"Installer error: {exc}\n")
+                  GLib.idle_add(self.finish, code)
 
+              def finish(self, code):
+                  self.set_busy(False)
+                  if code == 0:
+                      self.progress.set_fraction(1.0)
+                      self.set_status("Installation complete. Remove the ISO and reboot.")
+                      self.install_btn.set_sensitive(False)
+                      self.reboot_btn.set_visible(True)
+                  else:
+                      self.progress.set_fraction(0.0)
+                      self.set_status(f"Installation failed (exit code {code}). See log below.")
                   return False
 
 
-          app = Installer()
-          sys.exit(app.run(sys.argv))
-          PY
-
+          sys.exit(Installer().run(sys.argv))
+          EOF
           chmod +x "$TMP/usr/local/bin/phase1-installer.py"
 
-          # ------------------------------------------------------------
-          # Phase 1 backend
-          # ------------------------------------------------------------
+          # ---------------- motd ----------------
+          cat > "$TMP/etc/motd" <<'EOF'
+          Alpine Sway OS - live environment
 
-          cat > "$TMP/usr/local/sbin/phase1-backend" <<'SH'
-          #!/bin/sh
-
-          set -eu
-
-          echo "Available disks:"
-          lsblk -dn -o NAME,SIZE,TYPE
-
-          echo
-          echo "Run setup-alpine to install the base system."
-          echo "Example:"
-          echo
-          echo "setup-alpine"
-          echo
-          echo "The graphical installer intentionally does not"
-          echo "automatically erase a disk."
-          SH
-
-          chmod +x "$TMP/usr/local/sbin/phase1-backend"
-
-          # ------------------------------------------------------------
-          # NetworkManager
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/networkmanager.conf" <<'CONF'
-          [main]
-          plugins=keyfile
-          CONF
-
-          # ------------------------------------------------------------
-          # OpenRC services
-          # ------------------------------------------------------------
-
-          ln -sf /etc/init.d/dbus \
-              "$TMP/etc/runlevels/default/dbus"
-
-          ln -sf /etc/init.d/seatd \
-              "$TMP/etc/runlevels/default/seatd"
-
-          ln -sf /etc/init.d/NetworkManager \
-              "$TMP/etc/runlevels/default/NetworkManager"
-
-          # ------------------------------------------------------------
-          # APK repositories
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/apk/repositories" <<'REPOS'
-          https://dl-cdn.alpinelinux.org/alpine/edge/main
-          https://dl-cdn.alpinelinux.org/alpine/edge/community
-          REPOS
-
-          # ------------------------------------------------------------
-          # Hostname
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/hostname" <<'HOST'
-          alpine-sway
-          HOST
-
-          # ------------------------------------------------------------
-          # Root password
-          #
-          # Empty password allows the live ISO root login.
-          # The installed system should create its own user/password.
-          # ------------------------------------------------------------
-
-          cat > "$TMP/etc/motd" <<'MOTD'
-          Alpine Sway OS
-
-          Live environment
-
-          Start Sway manually with:
-
+          tty1 logs in as root and starts Sway and the graphical installer automatically.
+          Other TTYs: log in as root (no password). To start manually:
               dbus-run-session sway
-
-          Start the graphical installer with:
-
               python3 /usr/local/bin/phase1-installer.py
+          EOF
 
-          MOTD
+          # ---------------- world file ----------------
+          cp /tmp/sway-packages.txt "$TMP/etc/apk/world"
 
-          # ------------------------------------------------------------
-          # Build overlay
-          # ------------------------------------------------------------
+          cp "$TMP/etc/profile.d/sway.sh" "$TMP/etc/skel/.profile"
 
-          cat > "$TMP/etc/apk/world" <<'WORLD'
-          alpine-base
-          busybox
-          openrc
-          sway
-          swaybg
-          swayidle
-          swaylock
-          waybar
-          foot
-          dbus
-          dbus-openrc
-          dbus-x11
-          seatd
-          seatd-openrc
-          elogind
-          elogind-openrc
-          networkmanager
-          networkmanager-cli
-          networkmanager-openrc
-          python3
-          py3-gobject3
-          gtk4.0
-          util-linux
-          e2fsprogs
-          dosfstools
-          parted
-          bash
-          curl
-          wget
-          git
-          nano
-          vim
-          pciutils
-          usbutils
-          WORLD
+          # ---------------- autologin + autostart ----------------
+          cat > "$TMP/usr/local/sbin/autologin-root" <<'EOF'
+          #!/bin/sh
+          exec /bin/login -f root
+          EOF
+          chmod +x "$TMP/usr/local/sbin/autologin-root"
 
-          # ------------------------------------------------------------
-          # Generate APK overlay
-          # ------------------------------------------------------------
+          # Replace the default inittab so tty1 logs in root automatically
+          cat > "$TMP/etc/inittab" <<'EOF'
+          ::sysinit:/sbin/openrc sysinit
+          ::sysinit:/sbin/openrc boot
+          ::wait:/sbin/openrc default
 
-          cd "$TMP"
+          tty1::respawn:/sbin/getty -n -l /usr/local/sbin/autologin-root 38400 tty1
+          tty2::respawn:/sbin/getty 38400 tty2
+          tty3::respawn:/sbin/getty 38400 tty3
 
-          tar -czf /tmp/sway-overlay.tar.gz .
+          ::ctrlaltdel:/sbin/reboot
+          ::shutdown:/sbin/openrc shutdown
+          EOF
 
-          echo "Overlay created:"
-          ls -lh /tmp/sway-overlay.tar.gz
+          # Root's profile: start Sway on tty1, which launches the installer
+          cp "$TMP/etc/profile.d/sway.sh" "$TMP/root/.profile"
+          cat >> "$TMP/root/.profile" <<'EOF'
 
-      - name: Install overlay generator
+          if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
+              export LIBSEAT_BACKEND=seatd
+              exec dbus-run-session sway
+          fi
+          EOF
+
+          find "$TMP" -mindepth 1 | sort
+
+      - name: Install apkovl generator
         shell: sh
         run: |
           set -eux
 
-          mkdir -p /tmp/aports/scripts
+          # mkimage.sh calls: ./genapkovl-sway.sh <hostname>
+          # and expects <hostname>.apkovl.tar.gz in the current directory.
+          cat > /tmp/aports/scripts/genapkovl-sway.sh <<'EOF'
+          #!/bin/sh -e
 
-          cat > /tmp/aports/scripts/genapkovl-sway.sh <<'SH'
-          #!/bin/sh
-
-          set -eu
-
-          workdir="${tmpdir:-/tmp/sway-overlay}"
-
-          if [ ! -d "$workdir" ]; then
-              echo "ERROR: overlay directory does not exist"
+          HOSTNAME="$1"
+          if [ -z "$HOSTNAME" ]; then
+              echo "usage: $0 hostname" >&2
               exit 1
           fi
 
-          cd "$workdir"
+          SRC="${SWAY_OVERLAY:-/tmp/sway-overlay}"
+          [ -d "$SRC" ] || { echo "overlay $SRC missing" >&2; exit 1; }
 
-          find . -mindepth 1 -print
+          cleanup() { rm -rf "$tmp"; }
+          tmp="$(mktemp -d)"
+          trap cleanup EXIT
 
-          tar -czf "$output" .
+          cp -a "$SRC"/. "$tmp"/
 
-          echo "Generated overlay:"
-          ls -lh "$output"
-          SH
+          mkdir -p "$tmp/etc"
+          echo "$HOSTNAME" > "$tmp/etc/hostname"
+
+          mkdir -p "$tmp/etc/network"
+          cat > "$tmp/etc/network/interfaces" <<IFACES
+          auto lo
+          iface lo inet loopback
+          IFACES
+
+          rc_add() {
+              mkdir -p "$tmp/etc/runlevels/$2"
+              ln -sf "/etc/init.d/$1" "$tmp/etc/runlevels/$2/$1"
+          }
+
+          # sysinit
+          rc_add devfs sysinit
+          rc_add dmesg sysinit
+          rc_add udev sysinit
+          rc_add udev-trigger sysinit
+
+          # boot
+          rc_add modules boot
+          rc_add sysctl boot
+          rc_add hostname boot
+          rc_add bootmisc boot
+          rc_add syslog boot
+
+          # default
+          rc_add dbus default
+          rc_add bluetooth default
+          rc_add seatd default
+          rc_add elogind default
+          rc_add networkmanager default
+
+          # shutdown
+          rc_add mount-ro shutdown
+          rc_add killprocs shutdown
+          rc_add savecache shutdown
+
+          tar -c -C "$tmp" etc root usr | gzip -9n > "$HOSTNAME.apkovl.tar.gz"
+          EOF
 
           chmod +x /tmp/aports/scripts/genapkovl-sway.sh
 
-      - name: Verify package list
+      - name: Dry-run package resolution
         shell: sh
         run: |
           set -eux
-
-          cat > /tmp/test-world <<'WORLD'
-          alpine-base
-          busybox
-          openrc
-          sway
-          swaybg
-          swayidle
-          swaylock
-          waybar
-          foot
-          dbus
-          dbus-openrc
-          dbus-x11
-          seatd
-          seatd-openrc
-          elogind
-          elogind-openrc
-          networkmanager
-          networkmanager-cli
-          networkmanager-openrc
-          python3
-          py3-gobject3
-          gtk4.0
-          util-linux
-          e2fsprogs
-          dosfstools
-          parted
-          bash
-          curl
-          wget
-          git
-          nano
-          vim
-          pciutils
-          usbutils
-          WORLD
-
           apk update
-
-          apk add --no-cache $(tr '\n' ' ' < /tmp/test-world)
-
-          echo
-          echo "Python:"
-          python3 --version
-
-          echo
-          echo "GTK:"
-          apk info gtk4.0
-
-          echo
-          echo "GObject:"
-          apk info py3-gobject3
+          # Simulate only: confirms every package name exists without installing the desktop.
+          apk add --simulate $(tr '\n' ' ' < /tmp/sway-packages.txt) > /dev/null
 
       - name: Build Alpine ISO
         shell: sh
         run: |
           set -eux
 
-          mkdir -p /workspace/out
-
+          mkdir -p "$GITHUB_WORKSPACE/$OUTDIR"
           cd /tmp/aports
 
-          export PACKAGER_PRIVKEY=/root/.abuild/alpineos.rsa
-          export PACKAGER_PUBKEY=/root/.abuild/alpineos.rsa.pub
-
-          ./scripts/mkimage.sh \
+          sh scripts/mkimage.sh \
             --tag edge \
-            --outdir /workspace/out \
+            --outdir "$GITHUB_WORKSPACE/$OUTDIR" \
             --arch x86_64 \
             --hostkeys \
             --repository https://dl-cdn.alpinelinux.org/alpine/edge/main \
@@ -833,58 +829,20 @@ jobs:
         run: |
           set -eux
 
-          echo "Generated files:"
-          find /workspace/out -maxdepth 2 -type f -ls
+          find "$GITHUB_WORKSPACE/$OUTDIR" -maxdepth 2 -type f -ls
 
-          ISO="$(find /workspace/out -type f -name '*.iso' | head -n 1)"
+          ISO="$(find "$GITHUB_WORKSPACE/$OUTDIR" -type f -name '*.iso' | head -n 1)"
+          [ -n "$ISO" ] || { echo "ERROR: No ISO was generated."; exit 1; }
 
-          if [ -z "$ISO" ]; then
-              echo "ERROR: No ISO was generated."
-              exit 1
-          fi
-
-          echo "ISO:"
-          echo "$ISO"
-
-          echo
-          echo "ISO size:"
           du -h "$ISO"
-
-          echo
-          echo "ISO contents:"
-          xorriso \
-            -indev "$ISO" \
-            -find / \
-            -type f \
-            -print
-
-      - name: Verify Python is in generated image
-        shell: sh
-        run: |
-          set -eux
-
-          echo "Checking generated artifacts..."
-
-          find /workspace/out \
-            -type f \
-            -maxdepth 2 \
-            -print
-
-          echo
-          echo "The image package list explicitly contains:"
-          echo "python3"
-          echo "py3-gobject3"
-          echo "gtk4.0"
+          xorriso -indev "$ISO" -find / -maxdepth 2 -print
 
       - name: Calculate SHA256
         shell: sh
         run: |
           set -eux
-
-          cd /workspace/out
-
+          cd "$GITHUB_WORKSPACE/$OUTDIR"
           sha256sum *.iso > SHA256SUMS
-
           cat SHA256SUMS
 
       - name: Upload ISO artifact
@@ -892,8 +850,8 @@ jobs:
         with:
           name: alpine-sway-iso
           path: |
-            /workspace/out/*.iso
-            /workspace/out/SHA256SUMS
+            out/*.iso
+            out/SHA256SUMS
           if-no-files-found: error
 
       - name: Create GitHub release
@@ -903,6 +861,6 @@ jobs:
           tag_name: alpine-sway-${{ github.run_number }}
           name: Alpine Sway OS ${{ github.run_number }}
           files: |
-            /workspace/out/*.iso
-            /workspace/out/SHA256SUMS
+            out/*.iso
+            out/SHA256SUMS
           generate_release_notes: true
