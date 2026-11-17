@@ -45,6 +45,7 @@ jobs:
             mtools \
             nodejs \
             openssl \
+            python3 \
             squashfs-tools \
             sudo \
             syslinux \
