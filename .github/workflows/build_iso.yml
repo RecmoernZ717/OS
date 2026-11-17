@@ -121,6 +121,8 @@ jobs:
           linux-firmware-qca
 
           eudev
+          libinput
+          libinput-tools
           udev-init-scripts
           udev-init-scripts-openrc
 
@@ -270,12 +272,16 @@ jobs:
 
           input type:pointer {
               accel_profile flat
+              pointer_accel 0
           }
 
-          # Explicit cursor theme for VirtualBox and other VMs.
+          # Explicit cursor theme and pointer visibility for VirtualBox.
           seat seat0 xcursor_theme Adwaita 24
+          seat seat0 hide_cursor 0
+          seat seat0 fallback true
 
           exec dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+          exec sh -c 'export XCURSOR_THEME=Adwaita; export XCURSOR_SIZE=24; sleep 1'
 
           exec_always --no-startup-id waybar
 
@@ -878,6 +884,10 @@ jobs:
           # Ensure the live image contains the compatibility and cursor packages.
           grep -Fx 'xwayland' /tmp/sway-packages.txt
           grep -Fx 'adwaita-icon-theme' /tmp/sway-packages.txt
+          grep -Fx 'libinput' /tmp/sway-packages.txt
+          grep -Fx 'libinput-tools' /tmp/sway-packages.txt
+          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/etc/sway/config
+          grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/etc/sway/config
 
           python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
