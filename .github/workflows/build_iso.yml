@@ -101,6 +101,7 @@ jobs:
 
           # Single source of truth: used for the ISO profile AND the live world file.
           cat > /tmp/sway-packages.txt <<'EOF'
+          adwaita-icon-theme
           alpine-base
           alpine-conf
           busybox
@@ -256,7 +257,7 @@ jobs:
           chmod 644 "$TMP/etc/profile.d/sway.sh"
 
           # ---------------- sway ----------------
-          cat > "$TMP/etc/sway/config" <<'EOF'
+          cat > "$TMP/root/.config/sway/config" <<'EOF'
           set $mod Mod4
 
           font pango:DejaVu Sans 10
@@ -280,20 +281,21 @@ jobs:
           seat seat0 hide_cursor 0
           seat seat0 fallback true
 
-          exec dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+          exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
           exec sh -c 'export XCURSOR_THEME=Adwaita; export XCURSOR_SIZE=24; sleep 1'
+          exec sh -c 'echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"; echo "DISPLAY=$DISPLAY"; echo "XDG_SESSION_TYPE=$XDG_SESSION_TYPE"; pgrep -a Xwayland || true; swaymsg -t get_version || true; sleep 1'
 
           exec_always --no-startup-id waybar
 
           # Tray applets for Wi-Fi and Bluetooth
           exec nm-applet --indicator
-          exec blueman-applet
+          #exec blueman-applet
 
           # Launch the installer automatically on start.
           # GTK4 is forced onto Xwayland because the live Sway environment
           # was producing a Wayland protocol error (Gdk error 71).
           # The installer is intentionally part of the live ISO only.
-          exec sh -c 'sleep 2; export GDK_BACKEND=x11; export XCURSOR_THEME=Adwaita; export XCURSOR_SIZE=24; python3 /usr/local/bin/phase1-installer.py || { rc=$?; echo "Installer exited with status $rc" >&2; sleep 2; }'
+          exec sh -c 'sleep 2; export GDK_BACKEND=wayland; GSK_RENDERER=cairo; export XCURSOR_THEME=Adwaita; export XCURSOR_SIZE=24; python3 /usr/local/bin/phase1-installer.py || { rc=$?; echo "Installer exited with status $rc" >&2; sleep 2; }'
           for_window [title="Alpine Sway OS Installer"] floating enable
           for_window [title="Alpine Sway OS Installer"] resize set 700 560
           for_window [title="Alpine Sway OS Installer"] move position center
@@ -373,7 +375,7 @@ jobs:
           }
 
           window#waybar {
-              background: rgba(20, 20, 20, 0.95);
+              background: rgba(75, 249, 157, 1);
               color: white;
           }
 
@@ -767,6 +769,10 @@ jobs:
 
           if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
               export LIBSEAT_BACKEND=seatd
+              export WLR_RENDERER=pixman
+              export WLR_NO_HARDWARE_CURSORS=1
+              export XDG_CURRENT_DESKTOP=sway
+              export XDG_SESSION_TYPE=wayland
               exec dbus-run-session sway
           fi
           EOF
