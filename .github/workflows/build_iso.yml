@@ -277,9 +277,13 @@ jobs:
           exec nm-applet --indicator
           exec blueman-applet
 
-          # Launch the installer automatically on start
-          exec python3 /usr/local/bin/phase1-installer.py
+          # Launch the installer automatically on start.
+          # The installer is intentionally part of the live ISO only.
+          exec sh -c 'python3 /usr/local/bin/phase1-installer.py || { echo "Installer exited with status $?" >&2; sleep 2; }'
           for_window [app_id="org.alpineos.installer"] floating enable, resize set 700 500, move position center
+
+          # Exit Sway cleanly back to tty1.  The tty1 getty is respawned by init,
+          # so leaving the desktop does not terminate the live system.
 
           bindsym $mod+Return exec foot
           bindsym $mod+d exec foot
@@ -723,7 +727,7 @@ jobs:
           # Replace the default inittab so tty1 logs in root automatically
           cat > "$TMP/etc/inittab" <<'EOF'
           ::sysinit:/sbin/openrc sysinit
-          ::sysinit:/sbin/openrc boot
+          ::wait:/sbin/openrc boot
           ::wait:/sbin/openrc default
 
           tty1::respawn:/sbin/getty -n -l /usr/local/sbin/autologin-root 38400 tty1
@@ -834,6 +838,24 @@ jobs:
             exit 1
           fi
           echo "All packages resolve."
+
+      - name: Validate generated live configuration
+        shell: sh
+        run: |
+          set -eux
+
+          test -x /tmp/sway-overlay/usr/local/bin/phase1-installer.py
+          test -x /tmp/sway-overlay/usr/local/sbin/phase1-backend
+
+          # Ensure the live boot sequence uses the correct OpenRC ordering.
+          grep -F '::sysinit:/sbin/openrc sysinit' /tmp/sway-overlay/etc/inittab
+          grep -F '::wait:/sbin/openrc boot' /tmp/sway-overlay/etc/inittab
+          grep -F '::wait:/sbin/openrc default' /tmp/sway-overlay/etc/inittab
+
+          # Ensure the Python installer is still automatically launched by Sway.
+          grep -F 'phase1-installer.py' /tmp/sway-overlay/etc/sway/config
+
+          python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
       - name: Build Alpine ISO
         shell: sh
