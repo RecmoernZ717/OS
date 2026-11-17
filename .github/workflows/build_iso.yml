@@ -44,8 +44,8 @@ jobs:
             mkinitfs \
             mtools \
             nodejs \
-            openssl \
             python3 \
+            openssl \
             squashfs-tools \
             sudo \
             syslinux \
@@ -132,6 +132,8 @@ jobs:
           foot
           xkeyboard-config
           font-dejavu
+          xwayland
+          adwaita-icon-theme
 
           mesa-dri-gallium
           mesa-egl
@@ -270,6 +272,9 @@ jobs:
               accel_profile flat
           }
 
+          # Explicit cursor theme for VirtualBox and other VMs.
+          seat seat0 xcursor_theme Adwaita 24
+
           exec dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
 
           exec_always --no-startup-id waybar
@@ -279,9 +284,13 @@ jobs:
           exec blueman-applet
 
           # Launch the installer automatically on start.
+          # GTK4 is forced onto Xwayland because the live Sway environment
+          # was producing a Wayland protocol error (Gdk error 71).
           # The installer is intentionally part of the live ISO only.
-          exec sh -c 'python3 /usr/local/bin/phase1-installer.py || { echo "Installer exited with status $?" >&2; sleep 2; }'
-          for_window [app_id="org.alpineos.installer"] floating enable, resize set 700 500, move position center
+          exec sh -c 'sleep 2; export GDK_BACKEND=x11; export XCURSOR_THEME=Adwaita; export XCURSOR_SIZE=24; python3 /usr/local/bin/phase1-installer.py || { rc=$?; echo "Installer exited with status $rc" >&2; sleep 2; }'
+          for_window [title="Alpine Sway OS Installer"] floating enable
+          for_window [title="Alpine Sway OS Installer"] resize set 700 560
+          for_window [title="Alpine Sway OS Installer"] move position center
 
           # Exit Sway cleanly back to tty1.  The tty1 getty is respawned by init,
           # so leaving the desktop does not terminate the live system.
@@ -479,6 +488,13 @@ jobs:
           import subprocess
           import sys
           import threading
+
+          # The live ISO launches this GTK application through Xwayland.
+          # These defaults also make manual launches from a TTY safer once
+          # a graphical Sway session is available.
+          os.environ.setdefault("GDK_BACKEND", "x11")
+          os.environ.setdefault("XCURSOR_THEME", "Adwaita")
+          os.environ.setdefault("XCURSOR_SIZE", "24")
 
           import gi
 
@@ -855,6 +871,13 @@ jobs:
 
           # Ensure the Python installer is still automatically launched by Sway.
           grep -F 'phase1-installer.py' /tmp/sway-overlay/etc/sway/config
+          grep -F 'GDK_BACKEND=x11' /tmp/sway-overlay/etc/sway/config
+          grep -F 'title="Alpine Sway OS Installer"' /tmp/sway-overlay/etc/sway/config
+          grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/etc/sway/config
+
+          # Ensure the live image contains the compatibility and cursor packages.
+          grep -Fx 'xwayland' /tmp/sway-packages.txt
+          grep -Fx 'adwaita-icon-theme' /tmp/sway-packages.txt
 
           python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
