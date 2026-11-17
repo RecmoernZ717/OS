@@ -866,8 +866,12 @@ jobs:
           ISO="$(find "$GITHUB_WORKSPACE/$OUTDIR" -type f -name '*.iso' | head -n 1)"
           [ -n "$ISO" ] || { echo "ERROR: No ISO was generated."; exit 1; }
 
+          echo "ISO: $ISO"
           du -h "$ISO"
-          xorriso -indev "$ISO" -find / -maxdepth 2 -print
+
+          # xorriso find uses different actions than GNU/BusyBox find
+          xorriso -indev "$ISO" -find / -maxdepth 2 -exec report_lba -- || true
+          xorriso -indev "$ISO" -ls / || true
 
       - name: Calculate SHA256
         shell: sh
