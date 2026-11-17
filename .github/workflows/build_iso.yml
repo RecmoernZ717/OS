@@ -842,6 +842,8 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/$OUTDIR"
           cd /tmp/aports
 
+          sed -i 's/ add --initdb --no-chown/ add --initdb/' scripts/mkimage.sh
+
           export SWAY_OVERLAY=/tmp/sway-overlay
           # PACKAGER_PRIVKEY / PACKAGER_PUBKEY are already in the environment
 
