@@ -6,19 +6,14 @@ on:
       - main
     tags:
       - "v*"
-
   workflow_dispatch:
 
 permissions:
   contents: write
 
-
 jobs:
-
   build-iso:
-
     name: Build Alpine Sway OS ISO
-
     runs-on: ubuntu-latest
 
     container:
@@ -30,22 +25,21 @@ jobs:
       OS_FILES: /tmp/os-files
       ISO_OUT: /workspace/out
 
-
     steps:
 
-      # ==========================================================
-      # CHECKOUT
-      # ==========================================================
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # ==========================================================
-      # DEPENDENCIES
-      # ==========================================================
+      # ============================================================
+      # 2. BUILD DEPENDENCIES
+      # ============================================================
 
-      - name: Install build dependencies
+      - name: Install Alpine ISO build dependencies
         shell: sh
         run: |
           set -eux
@@ -77,15 +71,10 @@ jobs:
             util-linux \
             xorriso
 
-          python3 --version
-          apk --version
-          git --version
-          xorriso -version
 
-
-      # ==========================================================
-      # CLONE APORTS
-      # ==========================================================
+      # ============================================================
+      # 3. CLONE ALPINE APORTS
+      # ============================================================
 
       - name: Clone Alpine aports
         shell: sh
@@ -99,27 +88,14 @@ jobs:
             https://github.com/alpinelinux/aports.git \
             "$APORTS_DIR"
 
-          test -x \
-            "$APORTS_DIR/scripts/mkimage.sh"
-
-          test -f \
-            "$APORTS_DIR/scripts/mkimg.base.sh"
-
-          echo "Alpine aports cloned successfully."
+          test -f "$APORTS_DIR/scripts/mkimage.sh"
 
 
-      # ==========================================================
-      # FIX CURRENT APK / MKIMAGE COMPATIBILITY
-      #
-      # Current aports mkimage.sh contains:
-      #
-      # apk --arch "$ARCH" --root "$APKROOT" add --initdb --no-chown
-      #
-      # Remove --no-chown because current apk rejects that mode
-      # when mkimage is running as root.
-      # ==========================================================
+      # ============================================================
+      # 4. PATCH CURRENT MKIMAGE/APK COMPATIBILITY
+      # ============================================================
 
-      - name: Patch mkimage apk compatibility
+      - name: Patch mkimage.sh for Alpine edge
         shell: sh
         run: |
           set -eux
@@ -128,42 +104,20 @@ jobs:
 
           test -f "$MKIMAGE"
 
-          echo "Original mkimage invocation:"
-
-          grep -n \
-            -- "--initdb" \
-            "$MKIMAGE" || true
-
           sed -i \
             's/ add --initdb --no-chown/ add --initdb/g' \
             "$MKIMAGE"
 
-          echo "Patched mkimage invocation:"
-
           grep -n \
-            -- "--initdb" \
-            "$MKIMAGE"
-
-          if grep -q \
-            -- "--no-chown" \
-            "$MKIMAGE"; then
-
-            echo "ERROR: --no-chown is still present."
-
-            exit 1
-          fi
-
-          sh -n \
-            "$MKIMAGE"
-
-          echo "mkimage.sh compatibility patch passed."
+            "initdb" \
+            "$MKIMAGE" || true
 
 
-      # ==========================================================
-      # SIGNING KEY
-      # ==========================================================
+      # ============================================================
+      # 5. CREATE ABUILD SIGNING KEY
+      # ============================================================
 
-      - name: Create Alpine package signing key
+      - name: Configure abuild signing key
         shell: sh
         run: |
           set -eux
@@ -181,11 +135,8 @@ jobs:
             -i \
             -n
 
-          echo "Searching for generated private key..."
-
           PRIVKEY="$(
-            find \
-              "$HOME/.config/abuild" \
+            find "$HOME/.config/abuild" \
               -maxdepth 1 \
               -type f \
               -name '*.rsa' \
@@ -200,46 +151,38 @@ jobs:
 
           test -f "$PUBKEY"
 
-          echo "Private key found:"
-          echo "$PRIVKEY"
-
-          echo "Public key found:"
-          echo "$PUBKEY"
-
           cp \
             "$PUBKEY" \
             /etc/apk/keys/
 
-          echo "PACKAGER_PRIVKEY=$PRIVKEY" \
-            >> "$GITHUB_ENV"
+          echo "PACKAGER_PRIVKEY=$PRIVKEY" >> "$GITHUB_ENV"
+          echo "PACKAGER_PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
 
-          echo "PACKAGER_PUBKEY=$PUBKEY" \
-            >> "$GITHUB_ENV"
-
-          echo "Signing key configured."
+          echo "Signing key:"
+          echo "$PRIVKEY"
 
 
-      # ==========================================================
-      # CREATE OS FILE TREE
-      # ==========================================================
+      # ============================================================
+      # 6. CREATE OS FILE TREE
+      # ============================================================
 
-      - name: Create OS file tree
+      - name: Generate Sway OS files
         shell: sh
         run: |
           set -eux
 
-          rm -rf \
-            "$OS_FILES"
+          rm -rf "$OS_FILES"
 
           mkdir -p \
             "$OS_FILES/configs/sway" \
             "$OS_FILES/configs/waybar" \
+            "$OS_FILES/configs/nwg-dock" \
             "$OS_FILES/installer"
 
 
-      # ==========================================================
-      # SWAY CONFIG
-      # ==========================================================
+      # ============================================================
+      # 7. SWAY CONFIGURATION
+      # ============================================================
 
       - name: Generate Sway configuration
         shell: sh
@@ -254,25 +197,32 @@ jobs:
 
           output * bg #1e1e2e solid_color
 
+          # Terminal
           bindsym $mod+Return exec $term
 
+          # Application launcher
           bindsym $mod+d exec $menu
 
+          # Window controls
           bindsym $mod+Shift+q kill
           bindsym $mod+Shift+c reload
-          bindsym $mod+f fullscreen
-          bindsym $mod+Shift+space floating toggle
 
+          # Exit Sway
+          bindsym $mod+Shift+e exit
+
+          # Focus
           bindsym $mod+Left focus left
           bindsym $mod+Down focus down
           bindsym $mod+Up focus up
           bindsym $mod+Right focus right
 
+          # Move windows
           bindsym $mod+Shift+Left move left
           bindsym $mod+Shift+Down move down
           bindsym $mod+Shift+Up move up
           bindsym $mod+Shift+Right move right
 
+          # Workspaces
           bindsym $mod+1 workspace number 1
           bindsym $mod+2 workspace number 2
           bindsym $mod+3 workspace number 3
@@ -285,22 +235,37 @@ jobs:
           bindsym $mod+Shift+4 move container to workspace number 4
           bindsym $mod+Shift+5 move container to workspace number 5
 
-          gaps inner 8
-          gaps outer 4
+          # Layout
+          bindsym $mod+f fullscreen
+          bindsym $mod+Shift+space floating toggle
 
           floating_modifier $mod normal
 
+          # Gaps
+          gaps inner 8
+          gaps outer 4
+
+          # Borders
           default_border pixel 2
 
-          exec_always waybar
+          client.focused #89b4fa #1e1e2e #cdd6f4 #89b4fa #89b4fa
+
+          # Waybar
+          bar {
+              swaybar_command waybar
+          }
+
+          # Notifications
           exec mako
-          exec nm-applet
+
+          # Start installer in the live environment
+          exec_always python3 /usr/local/bin/phase1-installer.py
           EOF
 
 
-      # ==========================================================
-      # WAYBAR
-      # ==========================================================
+      # ============================================================
+      # 8. WAYBAR CONFIGURATION
+      # ============================================================
 
       - name: Generate Waybar configuration
         shell: sh
@@ -311,7 +276,7 @@ jobs:
           {
               "layer": "top",
               "position": "top",
-              "height": 32,
+              "height": 30,
 
               "modules-left": [
                   "custom/launcher",
@@ -326,17 +291,16 @@ jobs:
               "modules-right": [
                   "network",
                   "pulseaudio",
-                  "battery",
-                  "tray"
+                  "battery"
               ],
 
               "custom/launcher": {
-                  "format": "  Apps  ",
+                  "format": "Apps",
                   "on-click": "wofi --show drun"
               },
 
               "clock": {
-                  "format": "{:%Y-%m-%d %H:%M}"
+                  "format": "{:%Y-%m-%d %H:%M:%S}"
               },
 
               "network": {
@@ -352,30 +316,26 @@ jobs:
 
               "battery": {
                   "format": "Bat: {capacity}%"
-              },
-
-              "tray": {
-                  "spacing": 8
               }
           }
           EOF
 
-
           cat > "$OS_FILES/configs/waybar/style.css" <<'EOF'
           * {
-              font-family: "JetBrains Mono", monospace;
+              font-family: monospace;
               font-size: 13px;
               border: none;
+              border-radius: 0;
           }
 
           window#waybar {
-              background: #1e1e2e;
+              background-color: #1e1e2e;
               color: #cdd6f4;
           }
 
           #custom-launcher {
               padding: 0 12px;
-              background: #89b4fa;
+              background-color: #89b4fa;
               color: #1e1e2e;
               font-weight: bold;
           }
@@ -386,36 +346,50 @@ jobs:
           }
 
           #workspaces button.focused {
-              background: #313244;
+              background-color: #313244;
               color: #cdd6f4;
           }
 
           #clock,
           #network,
           #pulseaudio,
-          #battery,
-          #tray {
+          #battery {
               padding: 0 12px;
           }
           EOF
 
 
-      # ==========================================================
-      # PHASE 1 INSTALLER
-      # ==========================================================
+      # ============================================================
+      # 9. DOCK CONFIG
+      # ============================================================
+
+      - name: Generate dock configuration
+        shell: sh
+        run: |
+          set -eux
+
+          cat > "$OS_FILES/configs/nwg-dock/pinned" <<'EOF'
+          foot
+          firefox
+          thunar
+          EOF
+
+
+      # ============================================================
+      # 10. PHASE 1 INSTALLER
+      # ============================================================
 
       - name: Generate Phase 1 installer
         shell: sh
         run: |
           set -eux
 
-          cat > "$OS_FILES/installer/phase1-installer.py" <<'PYEOF'
+          cat > "$OS_FILES/installer/phase1-installer.py" <<'EOF'
           #!/usr/bin/env python3
 
           import json
           import subprocess
           import threading
-
           import gi
 
           gi.require_version("Gtk", "4.0")
@@ -423,22 +397,20 @@ jobs:
           from gi.repository import Gtk, GLib
 
 
-          class InstallerWindow(Gtk.ApplicationWindow):
+          class Phase1Window(Gtk.ApplicationWindow):
 
               def __init__(self, app):
                   super().__init__(
                       application=app,
-                      title="Alpine Sway OS Installer"
+                      title="Install Alpine Sway OS"
                   )
 
-                  self.set_default_size(
-                      700,
-                      520
-                  )
+                  self.set_default_size(560, 420)
+                  self.set_resizable(False)
 
                   box = Gtk.Box(
                       orientation=Gtk.Orientation.VERTICAL,
-                      spacing=12
+                      spacing=14
                   )
 
                   box.set_margin_top(24)
@@ -449,7 +421,7 @@ jobs:
                   self.set_child(box)
 
                   title = Gtk.Label(
-                      label="<span size='xx-large' weight='bold'>Alpine Sway OS</span>"
+                      label="<span size='x-large' weight='bold'>Install Alpine Sway OS</span>"
                   )
 
                   title.set_use_markup(True)
@@ -457,154 +429,195 @@ jobs:
 
                   box.append(title)
 
-                  subtitle = Gtk.Label(
-                      label="Select the disk where Alpine Sway OS should be installed."
+                  self.stack = Gtk.Stack()
+                  self.stack.set_vexpand(True)
+
+                  box.append(self.stack)
+
+                  # --------------------------------------------------
+                  # Disk selection
+                  # --------------------------------------------------
+
+                  page = Gtk.Box(
+                      orientation=Gtk.Orientation.VERTICAL,
+                      spacing=12
                   )
 
-                  subtitle.set_halign(Gtk.Align.START)
+                  label = Gtk.Label(
+                      label="Select the target drive:"
+                  )
 
-                  box.append(subtitle)
+                  label.set_halign(Gtk.Align.START)
+
+                  page.append(label)
 
                   self.disk_combo = Gtk.ComboBoxText()
 
-                  box.append(self.disk_combo)
+                  self.populate_disks()
+
+                  page.append(self.disk_combo)
 
                   warning = Gtk.Label(
-                      label="WARNING: Installing to a disk will erase that disk."
+                      label="WARNING: Installing will erase the selected drive."
                   )
 
                   warning.set_halign(Gtk.Align.START)
 
-                  box.append(warning)
+                  page.append(warning)
+
+                  install_button = Gtk.Button(
+                      label="Install OS to Disk"
+                  )
+
+                  install_button.add_css_class(
+                      "suggested-action"
+                  )
+
+                  install_button.connect(
+                      "clicked",
+                      self.start_install
+                  )
+
+                  page.append(install_button)
+
+                  self.stack.add_named(
+                      page,
+                      "select"
+                  )
+
+                  # --------------------------------------------------
+                  # Progress page
+                  # --------------------------------------------------
+
+                  progress_page = Gtk.Box(
+                      orientation=Gtk.Orientation.VERTICAL,
+                      spacing=12
+                  )
 
                   self.status = Gtk.Label(
-                      label=""
+                      label="Installing..."
                   )
 
                   self.status.set_halign(
                       Gtk.Align.START
                   )
 
-                  box.append(self.status)
+                  progress_page.append(
+                      self.status
+                  )
 
                   self.progress = Gtk.ProgressBar()
 
-                  box.append(self.progress)
-
-                  install = Gtk.Button(
-                      label="Install"
+                  progress_page.append(
+                      self.progress
                   )
 
-                  install.add_css_class(
-                      "suggested-action"
-                  )
+                  self.log_view = Gtk.TextView()
 
-                  install.connect(
-                      "clicked",
-                      self.start_install
-                  )
-
-                  box.append(install)
-
-                  self.install_button = install
-
-                  self.log = Gtk.TextView()
-
-                  self.log.set_editable(False)
-
-                  self.log_buffer = self.log.get_buffer()
+                  self.log_view.set_editable(False)
 
                   scroll = Gtk.ScrolledWindow()
 
                   scroll.set_vexpand(True)
-
                   scroll.set_child(
-                      self.log
+                      self.log_view
                   )
 
-                  box.append(scroll)
+                  progress_page.append(
+                      scroll
+                  )
 
-                  self.populate_disks()
+                  self.reboot_button = Gtk.Button(
+                      label="Reboot"
+                  )
+
+                  self.reboot_button.set_sensitive(
+                      False
+                  )
+
+                  self.reboot_button.connect(
+                      "clicked",
+                      self.reboot
+                  )
+
+                  progress_page.append(
+                      self.reboot_button
+                  )
+
+                  self.stack.add_named(
+                      progress_page,
+                      "progress"
+                  )
 
 
               def populate_disks(self):
 
                   try:
-
                       result = subprocess.check_output(
                           [
                               "lsblk",
                               "-J",
                               "-d",
                               "-o",
-                              "NAME,SIZE,MODEL,TYPE"
+                              "NAME,SIZE,MODEL"
                           ],
                           text=True
                       )
 
                       devices = json.loads(
                           result
+                      ).get(
+                          "blockdevices",
+                          []
+                      )
+
+                      for device in devices:
+
+                          name = device.get(
+                              "name",
+                              ""
+                          )
+
+                          if name.startswith(
+                              (
+                                  "loop",
+                                  "sr",
+                                  "ram"
+                              )
+                          ):
+                              continue
+
+                          path = "/dev/" + name
+
+                          size = device.get(
+                              "size",
+                              ""
+                          )
+
+                          model = device.get(
+                              "model",
+                              ""
+                          )
+
+                          display = (
+                              f"{path} "
+                              f"({size} {model.strip()})"
+                          )
+
+                          self.disk_combo.append(
+                              path,
+                              display
+                          )
+
+                      self.disk_combo.set_active(
+                          0
                       )
 
                   except Exception as error:
 
-                      self.status.set_text(
-                          f"Disk detection failed: {error}"
+                      self.status_error = str(
+                          error
                       )
-
-                      return
-
-                  for device in devices.get(
-                      "blockdevices",
-                      []
-                  ):
-
-                      name = device.get(
-                          "name",
-                          ""
-                      )
-
-                      if device.get("type") != "disk":
-                          continue
-
-                      if name.startswith(
-                          (
-                              "loop",
-                              "ram",
-                              "sr"
-                          )
-                      ):
-                          continue
-
-                      path = f"/dev/{name}"
-
-                      size = device.get(
-                          "size",
-                          ""
-                      )
-
-                      model = (
-                          device.get(
-                              "model",
-                              ""
-                          )
-                          or ""
-                      ).strip()
-
-                      label = path
-
-                      if size:
-                          label += f" ({size})"
-
-                      if model:
-                          label += f" - {model}"
-
-                      self.disk_combo.append(
-                          path,
-                          label
-                      )
-
-                  self.disk_combo.set_active(0)
 
 
               def start_install(self, _button):
@@ -612,28 +625,32 @@ jobs:
                   disk = self.disk_combo.get_active_id()
 
                   if not disk:
-                      self.status.set_text(
-                          "Select a disk first."
-                      )
-
                       return
 
-                  self.install_button.set_sensitive(
-                      False
-                  )
-
-                  self.status.set_text(
-                      f"Installing to {disk}..."
+                  self.stack.set_visible_child_name(
+                      "progress"
                   )
 
                   threading.Thread(
-                      target=self.install_worker,
+                      target=self.run_install,
                       args=(disk,),
                       daemon=True
                   ).start()
 
 
-              def install_worker(self, disk):
+              def append_log(self, text):
+
+                  buffer = self.log_view.get_buffer()
+
+                  end = buffer.get_end_iter()
+
+                  buffer.insert(
+                      end,
+                      text
+                  )
+
+
+              def run_install(self, disk):
 
                   try:
 
@@ -647,18 +664,16 @@ jobs:
                           text=True
                       )
 
-                      if process.stdout:
+                      for line in process.stdout:
 
-                          for line in process.stdout:
+                          GLib.idle_add(
+                              self.append_log,
+                              line
+                          )
 
-                              GLib.idle_add(
-                                  self.add_log,
-                                  line.rstrip()
-                              )
-
-                              GLib.idle_add(
-                                  self.progress.pulse
-                              )
+                          GLib.idle_add(
+                              self.progress.pulse
+                          )
 
                       process.wait()
 
@@ -669,42 +684,39 @@ jobs:
                               "Installation complete."
                           )
 
+                          GLib.idle_add(
+                              self.progress.set_fraction,
+                              1.0
+                          )
+
+                          GLib.idle_add(
+                              self.reboot_button.set_sensitive,
+                              True
+                          )
+
                       else:
 
                           GLib.idle_add(
                               self.status.set_text,
-                              f"Installation failed: {process.returncode}"
-                          )
-
-                          GLib.idle_add(
-                              self.install_button.set_sensitive,
-                              True
+                              "Installation failed."
                           )
 
                   except Exception as error:
 
                       GLib.idle_add(
                           self.status.set_text,
-                          f"Installation error: {error}"
-                      )
-
-                      GLib.idle_add(
-                          self.install_button.set_sensitive,
-                          True
+                          f"Error: {error}"
                       )
 
 
-              def add_log(self, line):
+              def reboot(self, _button):
 
-                  end = self.log_buffer.get_end_iter()
-
-                  self.log_buffer.insert(
-                      end,
-                      line + "\n"
+                  subprocess.run(
+                      ["reboot"]
                   )
 
 
-          class InstallerApp(Gtk.Application):
+          class App(Gtk.Application):
 
               def __init__(self):
 
@@ -712,43 +724,37 @@ jobs:
                       application_id="org.alpine.sway.installer"
                   )
 
-                  self.connect(
-                      "activate",
-                      self.activate
+
+              def do_activate(self):
+
+                  window = Phase1Window(
+                      self
                   )
-
-
-              def activate(self, app):
-
-                  window = InstallerWindow(app)
 
                   window.present()
 
 
-          app = InstallerApp()
-
-          app.run(None)
-          PYEOF
+          App().run()
+          EOF
 
           chmod +x \
             "$OS_FILES/installer/phase1-installer.py"
 
 
-      # ==========================================================
-      # OOBE
-      # ==========================================================
+      # ============================================================
+      # 11. PHASE 2 OOBE
+      # ============================================================
 
-      - name: Generate OOBE
+      - name: Generate Phase 2 OOBE
         shell: sh
         run: |
           set -eux
 
-          cat > "$OS_FILES/installer/phase2-oobe.py" <<'PYEOF'
+          cat > "$OS_FILES/installer/phase2-oobe.py" <<'EOF'
           #!/usr/bin/env python3
 
           import subprocess
           import threading
-
           import gi
 
           gi.require_version("Gtk", "4.0")
@@ -767,89 +773,180 @@ jobs:
 
                   self.set_default_size(
                       600,
-                      500
+                      450
                   )
 
-                  box = Gtk.Box(
+                  outer = Gtk.Box(
                       orientation=Gtk.Orientation.VERTICAL,
-                      spacing=16
+                      spacing=20
                   )
 
-                  box.set_margin_top(32)
-                  box.set_margin_bottom(32)
-                  box.set_margin_start(32)
-                  box.set_margin_end(32)
+                  outer.set_margin_top(40)
+                  outer.set_margin_bottom(40)
+                  outer.set_margin_start(40)
+                  outer.set_margin_end(40)
 
-                  self.set_child(box)
-
-                  title = Gtk.Label(
-                      label="<span size='xx-large' weight='bold'>Welcome</span>"
+                  self.set_child(
+                      outer
                   )
 
-                  title.set_use_markup(True)
+                  self.stack = Gtk.Stack()
 
-                  box.append(title)
-
-                  user_label = Gtk.Label(
-                      label="Username"
-                  )
-
-                  user_label.set_halign(
-                      Gtk.Align.START
-                  )
-
-                  box.append(user_label)
-
-                  self.user = Gtk.Entry()
-
-                  self.user.set_placeholder_text(
-                      "Username"
-                  )
-
-                  box.append(self.user)
-
-                  pass_label = Gtk.Label(
-                      label="Password"
-                  )
-
-                  pass_label.set_halign(
-                      Gtk.Align.START
-                  )
-
-                  box.append(pass_label)
-
-                  self.password = Gtk.PasswordEntry()
-
-                  self.password.set_show_peek_icon(
+                  self.stack.set_vexpand(
                       True
                   )
 
-                  self.password.set_placeholder_text(
+                  outer.append(
+                      self.stack
+                  )
+
+                  # --------------------------------------------------
+                  # Wi-Fi
+                  # --------------------------------------------------
+
+                  wifi = Gtk.Box(
+                      orientation=Gtk.Orientation.VERTICAL,
+                      spacing=12
+                  )
+
+                  wifi.append(
+                      Gtk.Label(
+                          label="Connect to Wi-Fi"
+                      )
+                  )
+
+                  self.wifi_combo = Gtk.ComboBoxText()
+
+                  wifi.append(
+                      self.wifi_combo
+                  )
+
+                  self.wifi_password = Gtk.Entry()
+
+                  self.wifi_password.set_placeholder_text(
+                      "Wi-Fi Password"
+                  )
+
+                  self.wifi_password.set_visibility(
+                      False
+                  )
+
+                  wifi.append(
+                      self.wifi_password
+                  )
+
+                  self.wifi_status = Gtk.Label(
+                      label=""
+                  )
+
+                  wifi.append(
+                      self.wifi_status
+                  )
+
+                  buttons = Gtk.Box(
+                      orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=8
+                  )
+
+                  refresh = Gtk.Button(
+                      label="Refresh"
+                  )
+
+                  refresh.connect(
+                      "clicked",
+                      lambda _: self.scan_wifi()
+                  )
+
+                  skip = Gtk.Button(
+                      label="Skip"
+                  )
+
+                  skip.connect(
+                      "clicked",
+                      lambda _: self.stack.set_visible_child_name(
+                          "user"
+                      )
+                  )
+
+                  connect = Gtk.Button(
+                      label="Connect & Next"
+                  )
+
+                  connect.add_css_class(
+                      "suggested-action"
+                  )
+
+                  connect.connect(
+                      "clicked",
+                      self.connect_wifi
+                  )
+
+                  buttons.append(refresh)
+                  buttons.append(skip)
+                  buttons.append(connect)
+
+                  wifi.append(
+                      buttons
+                  )
+
+                  self.stack.add_named(
+                      wifi,
+                      "wifi"
+                  )
+
+                  # --------------------------------------------------
+                  # Account
+                  # --------------------------------------------------
+
+                  account = Gtk.Box(
+                      orientation=Gtk.Orientation.VERTICAL,
+                      spacing=12
+                  )
+
+                  account.append(
+                      Gtk.Label(
+                          label="Create Your Account"
+                      )
+                  )
+
+                  self.host_entry = Gtk.Entry(
+                      text="alpine-sway"
+                  )
+
+                  self.host_entry.set_placeholder_text(
+                      "Computer Name"
+                  )
+
+                  self.user_entry = Gtk.Entry()
+
+                  self.user_entry.set_placeholder_text(
+                      "Username"
+                  )
+
+                  self.password_entry = Gtk.Entry()
+
+                  self.password_entry.set_placeholder_text(
                       "Password"
                   )
 
-                  box.append(self.password)
-
-                  host_label = Gtk.Label(
-                      label="Computer name"
+                  self.password_entry.set_visibility(
+                      False
                   )
 
-                  host_label.set_halign(
-                      Gtk.Align.START
+                  account.append(
+                      self.host_entry
                   )
 
-                  box.append(host_label)
-
-                  self.hostname = Gtk.Entry()
-
-                  self.hostname.set_text(
-                      "alpine-sway"
+                  account.append(
+                      self.user_entry
                   )
 
-                  box.append(self.hostname)
+                  account.append(
+                      self.password_entry
+                  )
 
                   finish = Gtk.Button(
-                      label="Finish Setup"
+                      label="Finish & Launch Desktop"
                   )
 
                   finish.add_css_class(
@@ -861,73 +958,163 @@ jobs:
                       self.finish
                   )
 
-                  box.append(finish)
+                  account.append(
+                      finish
+                  )
+
+                  self.stack.add_named(
+                      account,
+                      "user"
+                  )
+
+                  self.scan_wifi()
 
 
-              def finish(self, _button):
+              def scan_wifi(self):
 
-                  username = (
-                      self.user
-                      .get_text()
-                      .strip()
+                  self.wifi_combo.remove_all()
+
+                  try:
+
+                      subprocess.run(
+                          [
+                              "nmcli",
+                              "dev",
+                              "wifi",
+                              "rescan"
+                          ],
+                          stderr=subprocess.DEVNULL
+                      )
+
+                      output = subprocess.check_output(
+                          [
+                              "nmcli",
+                              "-t",
+                              "-f",
+                              "SSID",
+                              "dev",
+                              "wifi",
+                              "list"
+                          ],
+                          text=True
+                      )
+
+                      seen = set()
+
+                      for line in output.splitlines():
+
+                          ssid = line.strip()
+
+                          if ssid and ssid not in seen:
+
+                              seen.add(
+                                  ssid
+                              )
+
+                              self.wifi_combo.append_text(
+                                  ssid
+                              )
+
+                      if seen:
+
+                          self.wifi_combo.set_active(
+                              0
+                          )
+
+                  except Exception:
+                      pass
+
+
+              def connect_wifi(self, _button):
+
+                  ssid = (
+                      self.wifi_combo
+                      .get_active_text()
                   )
 
                   password = (
-                      self.password
+                      self.wifi_password
                       .get_text()
                   )
 
-                  hostname = (
-                      self.hostname
-                      .get_text()
-                      .strip()
+                  if not ssid:
+                      return
+
+                  self.wifi_status.set_text(
+                      "Connecting..."
                   )
 
-                  if not username:
-                      return
+                  def worker():
 
-                  if not password:
-                      return
+                      result = subprocess.run(
+                          [
+                              "sudo",
+                              "nmcli",
+                              "dev",
+                              "wifi",
+                              "connect",
+                              ssid,
+                              "password",
+                              password
+                          ]
+                      )
 
-                  if not hostname:
-                      hostname = "alpine-sway"
+                      if result.returncode == 0:
+
+                          GLib.idle_add(
+                              self.stack.set_visible_child_name,
+                              "user"
+                          )
+
+                      else:
+
+                          GLib.idle_add(
+                              self.wifi_status.set_text,
+                              "Connection failed."
+                          )
 
                   threading.Thread(
-                      target=self.worker,
-                      args=(
-                          username,
-                          password,
-                          hostname
-                      ),
+                      target=worker,
                       daemon=True
                   ).start()
 
 
-              def worker(
-                  self,
-                  username,
-                  password,
-                  hostname
-              ):
+              def finish(self, _button):
 
-                  result = subprocess.run(
+                  user = (
+                      self.user_entry
+                      .get_text()
+                      .strip()
+                      .lower()
+                  )
+
+                  password = (
+                      self.password_entry
+                      .get_text()
+                  )
+
+                  hostname = (
+                      self.host_entry
+                      .get_text()
+                      .strip()
+                      or "alpine-sway"
+                  )
+
+                  if not user or not password:
+                      return
+
+                  subprocess.run(
                       [
                           "sudo",
                           "/usr/local/bin/finalize-oobe",
-                          username,
+                          user,
                           password,
                           hostname
                       ]
                   )
 
-                  if result.returncode == 0:
 
-                      GLib.idle_add(
-                          self.close
-                      )
-
-
-          class OOBEApp(Gtk.Application):
+          class App(Gtk.Application):
 
               def __init__(self):
 
@@ -935,33 +1122,28 @@ jobs:
                       application_id="org.alpine.sway.oobe"
                   )
 
-                  self.connect(
-                      "activate",
-                      self.activate
+
+              def do_activate(self):
+
+                  window = OOBEWindow(
+                      self
                   )
-
-
-              def activate(self, app):
-
-                  window = OOBEWindow(app)
 
                   window.present()
 
 
-          app = OOBEApp()
-
-          app.run(None)
-          PYEOF
+          App().run()
+          EOF
 
           chmod +x \
             "$OS_FILES/installer/phase2-oobe.py"
 
 
-      # ==========================================================
-      # SWAY IMAGE PROFILE
-      # ==========================================================
+      # ============================================================
+      # 12. ALPINE Sway PROFILE
+      # ============================================================
 
-      - name: Generate Sway image profile
+      - name: Generate Alpine Sway image profile
         shell: sh
         run: |
           set -eux
@@ -985,70 +1167,53 @@ jobs:
 
               arch="x86_64"
 
-              # The APK index is signed, but do not ask update-kernel
-              # to create/sign a modloop with a private key.
               modloop_sign=no
 
               apkovl="genapkovl-sway.sh"
 
-              apks="$apks
+              # Remove network-extras because its vlan dependency
+              # can conflict with ifupdown-ng on current Alpine edge.
+              apks="$(echo "$apks" | sed 's/network-extras//g')"
 
+              apks="$apks
                   sway
                   swaybg
                   swayidle
                   swaylock
-
                   waybar
                   wofi
-
                   foot
                   mako
-
                   thunar
                   gvfs
                   gvfs-smb
-
                   firefox
-
                   flatpak
-
                   xdg-desktop-portal
                   xdg-desktop-portal-wlr
                   xdg-desktop-portal-gtk
-
                   seatd
                   dbus
                   elogind
                   polkit-elogind
-
                   mesa-dri-gallium
                   xwayland
-
                   pipewire
                   wireplumber
                   pipewire-pulse
-
                   networkmanager
                   networkmanager-wifi
                   wpa_supplicant
-
                   python3
                   py3-gobject3
                   gtk4.0
-
-                  font-jetbrains-mono
-                  papirus-icon-theme
-
                   grim
                   slurp
                   wl-clipboard
-
                   sudo
-
                   util-linux
                   e2fsprogs
                   dosfstools
-
                   grub
                   grub-efi
                   efibootmgr
@@ -1056,13 +1221,10 @@ jobs:
           }
           EOF
 
-          chmod +x \
-            "$APORTS_DIR/scripts/mkimg.sway.sh"
 
-
-      # ==========================================================
-      # ALPINE OVERLAY
-      # ==========================================================
+      # ============================================================
+      # 13. ALPINE OVERLAY
+      # ============================================================
 
       - name: Generate Alpine overlay
         shell: sh
@@ -1072,150 +1234,181 @@ jobs:
           cat > "$APORTS_DIR/scripts/genapkovl-sway.sh" <<'EOF'
           #!/bin/sh -e
 
-          HOSTNAME="${1:-alpine-sway}"
+          HOSTNAME="$1"
+
+          [ -n "$HOSTNAME" ]
 
           tmp="$(mktemp -d)"
 
-          cleanup() {
-              rm -rf "$tmp"
+          trap 'rm -rf "$tmp"' EXIT
+
+
+          makefile() {
+
+              OWNER="$1"
+              PERMS="$2"
+              FILENAME="$3"
+
+              mkdir -p \
+                "$(dirname "$FILENAME")"
+
+              cat > "$FILENAME"
+
+              chown \
+                "$OWNER" \
+                "$FILENAME"
+
+              chmod \
+                "$PERMS" \
+                "$FILENAME"
           }
 
-          trap cleanup EXIT
+
+          rc_add() {
+
+              mkdir -p \
+                "$tmp/etc/runlevels/$2"
+
+              ln -sf \
+                "/etc/init.d/$1" \
+                "$tmp/etc/runlevels/$2/$1"
+          }
 
 
-          # ========================================================
-          # DIRECTORIES
-          # ========================================================
+          # --------------------------------------------------
+          # Desktop configuration
+          # --------------------------------------------------
 
           mkdir -p \
-              "$tmp/etc" \
-              "$tmp/etc/apk" \
-              "$tmp/etc/skel/.config/sway" \
-              "$tmp/etc/skel/.config/waybar" \
-              "$tmp/root/.config/sway" \
-              "$tmp/root/.config/waybar" \
-              "$tmp/usr/local/bin"
+            "$tmp/etc/skel/.config" \
+            "$tmp/root/.config"
+
+          cp -r \
+            /tmp/os-files/configs/* \
+            "$tmp/etc/skel/.config/"
+
+          cp -r \
+            /tmp/os-files/configs/* \
+            "$tmp/root/.config/"
 
 
-          # ========================================================
-          # SWAY
-          # ========================================================
+          # --------------------------------------------------
+          # Root live-session profile
+          # --------------------------------------------------
 
-          cp \
-              /tmp/os-files/configs/sway/config \
-              "$tmp/etc/skel/.config/sway/config"
+          makefile root:root 0644 \
+            "$tmp/root/.profile" <<'PROFILE'
 
-          cp \
-              /tmp/os-files/configs/sway/config \
-              "$tmp/root/.config/sway/config"
-
-
-          # ========================================================
-          # WAYBAR
-          # ========================================================
-
-          cp \
-              /tmp/os-files/configs/waybar/config.jsonc \
-              "$tmp/etc/skel/.config/waybar/config.jsonc"
-
-          cp \
-              /tmp/os-files/configs/waybar/style.css \
-              "$tmp/etc/skel/.config/waybar/style.css"
-
-          cp \
-              /tmp/os-files/configs/waybar/config.jsonc \
-              "$tmp/root/.config/waybar/config.jsonc"
-
-          cp \
-              /tmp/os-files/configs/waybar/style.css \
-              "$tmp/root/.config/waybar/style.css"
-
-
-          # ========================================================
-          # PROFILE
-          # ========================================================
-
-          cat > "$tmp/etc/skel/.profile" <<'PROFILE'
           export XDG_CURRENT_DESKTOP=sway
-          export XDG_SESSION_TYPE=wayland
           export MOZ_ENABLE_WAYLAND=1
+
+          if [ -z "$DISPLAY" ] &&
+             [ -z "$WAYLAND_DISPLAY" ] &&
+             [ "$(tty)" = "/dev/tty1" ]; then
+
+              exec dbus-run-session sway
+          fi
+
           PROFILE
 
-          cp \
-              "$tmp/etc/skel/.profile" \
-              "$tmp/root/.profile"
+
+          # --------------------------------------------------
+          # Skeleton user profile
+          # --------------------------------------------------
+
+          makefile root:root 0644 \
+            "$tmp/etc/skel/.profile" <<'PROFILE'
+
+          export XDG_CURRENT_DESKTOP=sway
+          export MOZ_ENABLE_WAYLAND=1
+
+          if [ -z "$DISPLAY" ] &&
+             [ -z "$WAYLAND_DISPLAY" ] &&
+             [ "$(tty)" = "/dev/tty1" ]; then
+
+              exec dbus-run-session sway
+          fi
+
+          PROFILE
 
 
-          # ========================================================
-          # HOSTNAME
-          # ========================================================
+          # --------------------------------------------------
+          # Hostname
+          # --------------------------------------------------
 
-          printf '%s\n' \
-              "$HOSTNAME" \
-              > "$tmp/etc/hostname"
+          makefile root:root 0644 \
+            "$tmp/etc/hostname" <<HOSTNAME
+          alpine-sway
+          HOSTNAME
 
 
-          # ========================================================
-          # APK WORLD
+          # --------------------------------------------------
+          # DO NOT replace Alpine's /etc/inittab.
           #
-          # Keep this limited to packages actually intended for
-          # the installed system.
-          # ========================================================
-
-          cat > "$tmp/etc/apk/world" <<'WORLD'
-          alpine-base
-          sway
-          swaybg
-          swayidle
-          swaylock
-          waybar
-          wofi
-          foot
-          mako
-          thunar
-          firefox
-          flatpak
-          seatd
-          dbus
-          elogind
-          networkmanager
-          python3
-          py3-gobject3
-          gtk4.0
-          util-linux
-          e2fsprogs
-          dosfstools
-          WORLD
+          # Alpine's standard init/inittab is required for
+          # normal live ISO shutdown and exit behavior.
+          # --------------------------------------------------
 
 
-          # ========================================================
-          # PHASE 1 BACKEND
-          # ========================================================
+          # --------------------------------------------------
+          # Installer scripts
+          # --------------------------------------------------
 
-          cat > "$tmp/usr/local/bin/phase1-backend" <<'PHASE1'
+          mkdir -p \
+            "$tmp/usr/local/bin"
+
+          cp \
+            /tmp/os-files/installer/phase1-installer.py \
+            "$tmp/usr/local/bin/phase1-installer.py"
+
+          cp \
+            /tmp/os-files/installer/phase2-oobe.py \
+            "$tmp/usr/local/bin/phase2-oobe.py"
+
+          chmod +x \
+            "$tmp/usr/local/bin/phase1-installer.py" \
+            "$tmp/usr/local/bin/phase2-oobe.py"
+
+
+          # --------------------------------------------------
+          # Phase 1 backend
+          # --------------------------------------------------
+
+          makefile root:root 0755 \
+            "$tmp/usr/local/bin/phase1-backend" <<'PHASE1'
           #!/bin/sh
 
-          set -eu
+          set -e
 
-          TARGET="$1"
+          TARGET_DISK="$1"
 
-          if [ -z "$TARGET" ]; then
-              echo "No disk selected."
+          if [ -z "$TARGET_DISK" ]; then
+              echo "No target disk specified."
               exit 1
           fi
 
-          case "$TARGET" in
-              /dev/*)
+          case "$TARGET_DISK" in
+
+              /dev/nvme*n*)
+                  ROOT_PART="${TARGET_DISK}p2"
                   ;;
+
+              /dev/mmcblk*)
+                  ROOT_PART="${TARGET_DISK}p2"
+                  ;;
+
               *)
-                  echo "Invalid disk."
-                  exit 1
+                  ROOT_PART="${TARGET_DISK}2"
                   ;;
+
           esac
 
-          echo "Installing Alpine Sway OS to $TARGET"
 
-          cat > /tmp/setup-answers <<ANSWERS
+          echo "Target disk: $TARGET_DISK"
+          echo "Expected root partition: $ROOT_PART"
+
+
+          cat > /tmp/setup-answers <<ANS
           KEYMAPOPTS="us us"
           HOSTNAMEOPTS="-n alpine-sway"
           INTERFACESOPTS="auto lo
@@ -1225,239 +1418,286 @@ jobs:
           PROXYOPTS="none"
           APKREPOSOPTS="-1"
           USEROPTS="none"
-          SSHDOPTS="none"
-          NTPOPTS="chrony"
-          DISKOPTS="-m sys $TARGET"
-          ANSWARES
+          SSHDOPTS="-c openssh"
+          NTPOPTS="-c openntpd"
+          DISKOPTS="-m sys $TARGET_DISK"
+          ANS
+
 
           setup-alpine \
-              -f /tmp/setup-answers
-
-          sync
-
-          echo "Installation finished."
-          PHASE1
-
-          chmod +x \
-              "$tmp/usr/local/bin/phase1-backend"
+            -f /tmp/setup-answers
 
 
-          # ========================================================
-          # OOBE FINALIZER
-          # ========================================================
+          if ! mount "$ROOT_PART" /mnt; then
 
-          cat > "$tmp/usr/local/bin/finalize-oobe" <<'FINALIZE'
-          #!/bin/sh
+              echo "Could not mount $ROOT_PART."
 
-          set -eu
-
-          USERNAME="$1"
-          PASSWORD="$2"
-          HOSTNAME="$3"
-
-          if [ -z "$USERNAME" ]; then
               exit 1
-          fi
-
-          if [ -z "$PASSWORD" ]; then
-              exit 1
-          fi
-
-          printf '%s\n' \
-              "$HOSTNAME" \
-              > /etc/hostname
-
-
-          if ! id "$USERNAME" >/dev/null 2>&1; then
-
-              adduser \
-                  -D \
-                  -G wheel \
-                  -s /bin/sh \
-                  "$USERNAME"
 
           fi
 
 
-          printf '%s:%s\n' \
-              "$USERNAME" \
-              "$PASSWORD" \
-              | chpasswd
+          mkdir -p \
+            /mnt/etc/skel/.config
+
+          cp -r \
+            /etc/skel/.config/* \
+            /mnt/etc/skel/.config/ \
+            || true
+
+
+          cp \
+            /usr/local/bin/phase2-oobe.py \
+            /mnt/usr/local/bin/phase2-oobe.py
+
+
+          # --------------------------------------------------
+          # Create temporary OOBE user
+          # --------------------------------------------------
+
+          chroot /mnt \
+            adduser \
+            -D \
+            -G wheel \
+            -s /bin/sh \
+            oem \
+            || true
 
 
           for group in \
               audio \
               video \
-              input \
+              netdev \
               seat \
-              netdev; do
+              input
+          do
 
-              addgroup \
-                  "$USERNAME" \
-                  "$group" \
-                  2>/dev/null || true
+              chroot /mnt \
+                addgroup oem "$group" \
+                2>/dev/null || true
 
           done
 
 
           mkdir -p \
-              "/home/$USERNAME/.config/sway" \
-              "/home/$USERNAME/.config/waybar"
+            /mnt/etc/sudoers.d
+
+          echo \
+            "oem ALL=(ALL) NOPASSWD: ALL" \
+            > /mnt/etc/sudoers.d/oem
+
+
+          mkdir -p \
+            /mnt/home/oem/.config/sway
+
+
+          cat > /mnt/home/oem/.config/sway/config <<'SWAY'
+          output * bg #1e1e2e solid_color
+
+          exec python3 /usr/local/bin/phase2-oobe.py
+          SWAY
 
 
           cp \
-              /etc/skel/.config/sway/config \
-              "/home/$USERNAME/.config/sway/config"
+            /etc/skel/.profile \
+            /mnt/home/oem/.profile \
+            || true
 
 
-          cp \
-              /etc/skel/.config/waybar/config.jsonc \
-              "/home/$USERNAME/.config/waybar/config.jsonc"
-
-
-          cp \
-              /etc/skel/.config/waybar/style.css \
-              "/home/$USERNAME/.config/waybar/style.css"
-
-
-          cp \
-              /etc/skel/.profile \
-              "/home/$USERNAME/.profile"
-
-
-          chown -R \
-              "$USERNAME:$USERNAME" \
-              "/home/$USERNAME"
+          chroot /mnt \
+            chown -R \
+            oem:oem \
+            /home/oem
 
 
           sync
 
-          reboot
-          FINALIZE
+          umount /mnt
 
-          chmod +x \
-              "$tmp/usr/local/bin/finalize-oobe"
-
-
-          # ========================================================
-          # OOBE
-          # ========================================================
-
-          cp \
-              /tmp/os-files/installer/phase2-oobe.py \
-              "$tmp/usr/local/bin/phase2-oobe.py"
-
-          chmod +x \
-              "$tmp/usr/local/bin/phase2-oobe.py"
+          echo "Phase 1 installation completed."
+          PHASE1
 
 
-          # ========================================================
-          # INIT
-          #
-          # Keep Alpine's normal OpenRC init structure.
-          # ========================================================
+          # --------------------------------------------------
+          # Final OOBE script
+          # --------------------------------------------------
 
-          cat > "$tmp/etc/inittab" <<'INITTAB'
-          ::sysinit:/sbin/openrc sysinit
-          ::sysinit:/sbin/openrc boot
-          ::wait:/sbin/openrc default
+          makefile root:root 0755 \
+            "$tmp/usr/local/bin/finalize-oobe" <<'PHASE2'
+          #!/bin/sh
 
-          tty1::respawn:/sbin/getty 38400 tty1
-          tty2::respawn:/sbin/getty 38400 tty2
+          set -e
 
-          ::ctrlaltdel:/sbin/reboot
-          ::shutdown:/sbin/openrc shutdown
-          INITTAB
+          NEW_USER="$1"
+          NEW_PASS="$2"
+          NEW_HOST="$3"
 
 
-          # ========================================================
-          # SERVICES
-          # ========================================================
+          if [ -z "$NEW_USER" ] ||
+             [ -z "$NEW_PASS" ]; then
 
-          mkdir -p \
-              "$tmp/etc/runlevels/default"
+              echo "Username and password are required."
+
+              exit 1
+
+          fi
 
 
-          for service in \
-              dbus \
-              seatd \
-              NetworkManager; do
+          NEW_HOST="${NEW_HOST:-alpine-sway}"
 
-              if [ -e "/etc/init.d/$service" ]; then
 
-                  ln -sf \
-                      "/etc/init.d/$service" \
-                      "$tmp/etc/runlevels/default/$service"
+          echo "$NEW_HOST" \
+            > /etc/hostname
 
-              fi
+          hostname "$NEW_HOST"
+
+
+          adduser \
+            -D \
+            -G wheel \
+            -s /bin/sh \
+            "$NEW_USER"
+
+
+          for group in \
+              audio \
+              video \
+              netdev \
+              seat \
+              input
+          do
+
+              addgroup \
+                "$NEW_USER" \
+                "$group" \
+                2>/dev/null || true
 
           done
 
 
-          # ========================================================
-          # IMPORTANT:
-          #
-          # Do NOT overwrite /etc/apk/repositories here.
-          #
-          # mkimage creates the ISO boot repository and
-          # /apks/.boot_repository.
-          # ========================================================
+          echo "$NEW_USER:$NEW_PASS" \
+            | chpasswd
 
 
-          # ========================================================
-          # CREATE APOKVOL
-          # ========================================================
+          mkdir -p \
+            "/home/$NEW_USER/.config"
+
+
+          cp -r \
+            /etc/skel/.config/* \
+            "/home/$NEW_USER/.config/" \
+            || true
+
+
+          cp \
+            /etc/skel/.profile \
+            "/home/$NEW_USER/.profile"
+
+
+          chown -R \
+            "$NEW_USER:$NEW_USER" \
+            "/home/$NEW_USER"
+
+
+          if command -v flatpak >/dev/null 2>&1; then
+
+              flatpak remote-add \
+                --if-not-exists \
+                flathub \
+                https://flathub.org/repo/flathub.flatpakrepo \
+                || true
+
+          fi
+
+
+          rm -f \
+            /etc/sudoers.d/oem
+
+
+          deluser \
+            --remove-home \
+            oem \
+            2>/dev/null || true
+
+
+          echo
+          echo "Setup complete."
+          echo "Rebooting..."
+
+
+          sleep 2
+
+          reboot
+          PHASE2
+
+
+          # --------------------------------------------------
+          # OpenRC services
+          # --------------------------------------------------
+
+          rc_add devfs sysinit
+          rc_add dmesg sysinit
+          rc_add mdev sysinit
+          rc_add hwdrivers sysinit
+
+          rc_add hwclock boot
+          rc_add modules boot
+          rc_add sysctl boot
+          rc_add hostname boot
+          rc_add bootmisc boot
+          rc_add syslog boot
+
+          rc_add dbus default
+          rc_add seatd default
+          rc_add networkmanager default
+
+
+          # --------------------------------------------------
+          # Create overlay
+          # --------------------------------------------------
 
           tar \
-              -C "$tmp" \
-              -czf \
-              "$HOSTNAME.apkovl.tar.gz" \
-              etc \
-              root \
-              usr
+            -c \
+            -C "$tmp" \
+            etc \
+            root \
+            usr \
+            | gzip -9n \
+            > "$HOSTNAME.apkovl.tar.gz"
+
           EOF
 
+
           chmod +x \
+            "$APORTS_DIR/scripts/mkimg.sway.sh" \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
 
-      # ==========================================================
-      # FIX TYPO / VALIDATE OVERLAY
-      # ==========================================================
+      # ============================================================
+      # 14. VALIDATE GENERATED FILES
+      # ============================================================
 
-      - name: Validate generated overlay
+      - name: Validate generated files
         shell: sh
         run: |
           set -eux
 
-          # The generated script must be valid shell.
-          sh -n \
-            "$APORTS_DIR/scripts/genapkovl-sway.sh"
-
-          # Catch accidental broken heredoc content.
-          grep -n \
-            "ANSWERS" \
-            "$APORTS_DIR/scripts/genapkovl-sway.sh"
-
-          echo "Overlay syntax is valid."
-
-
-      # ==========================================================
-      # PYTHON + SHELL VALIDATION
-      # ==========================================================
-
-      - name: Validate generated scripts
-        shell: sh
-        run: |
-          set -eux
-
-          test -x \
-            "$APORTS_DIR/scripts/mkimage.sh"
-
-          test -x \
+          test -f \
             "$APORTS_DIR/scripts/mkimg.sway.sh"
 
-          test -x \
+          test -f \
+            "$APORTS_DIR/scripts/genapkovl-sway.sh"
+
+          test -f \
+            "$OS_FILES/installer/phase1-installer.py"
+
+          test -f \
+            "$OS_FILES/installer/phase2-oobe.py"
+
+          sh -n \
+            "$APORTS_DIR/scripts/mkimg.sway.sh"
+
+          sh -n \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
           python3 -m py_compile \
@@ -1466,54 +1706,43 @@ jobs:
           python3 -m py_compile \
             "$OS_FILES/installer/phase2-oobe.py"
 
-          sh -n \
-            "$APORTS_DIR/scripts/mkimage.sh"
-
-          sh -n \
-            "$APORTS_DIR/scripts/mkimg.sway.sh"
-
-          sh -n \
-            "$APORTS_DIR/scripts/genapkovl-sway.sh"
-
-          echo "All generated files passed validation."
+          echo "Generated files validated."
 
 
-      # ==========================================================
-      # SIGNING VALIDATION
-      # ==========================================================
+      # ============================================================
+      # 15. VERIFY SIGNING KEY
+      # ============================================================
 
-      - name: Validate signing configuration
+      - name: Verify signing configuration
         shell: sh
         run: |
           set -eux
 
           test -n "$PACKAGER_PRIVKEY"
-          test -n "$PACKAGER_PUBKEY"
-
-          test -f "$PACKAGER_PRIVKEY"
-          test -f "$PACKAGER_PUBKEY"
-
-          KEY_NAME="$(basename "$PACKAGER_PUBKEY")"
 
           test -f \
-            "/etc/apk/keys/$KEY_NAME"
+            "$PACKAGER_PRIVKEY"
 
-          echo "Private key exists."
-          echo "Public key exists."
-          echo "APK public key installed."
+          test -n "$PACKAGER_PUBKEY"
+
+          test -f \
+            "$PACKAGER_PUBKEY"
+
+          echo "Private key:"
+          ls -l "$PACKAGER_PRIVKEY"
+
+          echo "Public key:"
+          ls -l "$PACKAGER_PUBKEY"
 
 
-      # ==========================================================
-      # BUILD ISO
-      # ==========================================================
+      # ============================================================
+      # 16. BUILD ISO
+      # ============================================================
 
       - name: Build Alpine Sway OS ISO
         shell: sh
         run: |
           set -eux
-
-          rm -rf \
-            "$ISO_OUT"
 
           mkdir -p \
             "$ISO_OUT"
@@ -1529,46 +1758,49 @@ jobs:
             --profile sway
 
 
-      # ==========================================================
-      # INSPECT OUTPUT
-      # ==========================================================
+      # ============================================================
+      # 17. SHOW BUILD OUTPUT
+      # ============================================================
 
       - name: Inspect ISO output
         shell: sh
         run: |
           set -eux
 
-          echo "Generated files:"
+          echo "ISO output directory:"
 
-          find \
-            "$ISO_OUT" \
-            -maxdepth 2 \
+          ls -lah \
+            "$ISO_OUT"
+
+          ISO_FILE="$(find "$ISO_OUT" \
+            -maxdepth 1 \
             -type f \
-            -print
-
-          ISO_FILE="$(
-            find \
-              "$ISO_OUT" \
-              -maxdepth 1 \
-              -type f \
-              -name '*.iso' \
-              -print \
-              | head -n 1
-          )"
+            -name '*.iso' \
+            -print \
+            | head -n 1)"
 
           test -n "$ISO_FILE"
           test -f "$ISO_FILE"
 
-          echo "ISO_FILE=$ISO_FILE" \
-            >> "$GITHUB_ENV"
+          echo "ISO:"
+          echo "$ISO_FILE"
 
-          ls -lh \
-            "$ISO_FILE"
+          echo "ISO size:"
+          du -h "$ISO_FILE"
+
+          echo "ISO file type:"
+
+          file "$ISO_FILE" || true
+
+          echo "ISO_FILE=$ISO_FILE" >> "$GITHUB_ENV"
 
 
-      # ==========================================================
-      # VERIFY ISO BOOT REPOSITORY
-      # ==========================================================
+      # ============================================================
+      # 18. VERIFY ISO BOOT STRUCTURE
+      #
+      # IMPORTANT:
+      # Alpine puts boot files in /boot, NOT /apks/boot.
+      # ============================================================
 
       - name: Verify ISO boot repository
         shell: sh
@@ -1586,21 +1818,33 @@ jobs:
           mkdir -p \
             "$MOUNT_DIR"
 
+
           mount \
             -o loop,ro \
             "$ISO_FILE" \
             "$MOUNT_DIR"
 
+
           cleanup() {
+
               umount \
                 "$MOUNT_DIR" \
                 2>/dev/null || true
+
           }
+
 
           trap cleanup EXIT
 
 
-          echo "ISO root:"
+          # --------------------------------------------------------
+          # ISO ROOT
+          # --------------------------------------------------------
+
+          echo
+          echo "========================================"
+          echo "ISO ROOT"
+          echo "========================================"
 
           ls -lah \
             "$MOUNT_DIR"
@@ -1622,6 +1866,7 @@ jobs:
             "$MOUNT_DIR/apks/.boot_repository"
 
 
+          echo
           echo "Boot repository marker:"
 
           cat \
@@ -1639,18 +1884,69 @@ jobs:
             "$MOUNT_DIR/apks/x86_64/APKINDEX.tar.gz"
 
 
+          echo
+          echo "APK repository:"
+
+          ls -lah \
+            "$MOUNT_DIR/apks/x86_64"
+
+
           # --------------------------------------------------------
-          # BOOT FILES
+          # TOP-LEVEL BOOT DIRECTORY
           # --------------------------------------------------------
 
           test -d \
-            "$MOUNT_DIR/apks/boot"
+            "$MOUNT_DIR/boot"
 
+
+          echo
           echo "Boot files:"
 
           find \
-            "$MOUNT_DIR/apks/boot" \
+            "$MOUNT_DIR/boot" \
             -maxdepth 3 \
+            -type f \
+            -print
+
+
+          # --------------------------------------------------------
+          # KERNEL
+          # --------------------------------------------------------
+
+          test -f \
+            "$MOUNT_DIR/boot/vmlinuz-lts"
+
+
+          # --------------------------------------------------------
+          # INITRAMFS
+          # --------------------------------------------------------
+
+          test -f \
+            "$MOUNT_DIR/boot/initramfs-lts"
+
+
+          # --------------------------------------------------------
+          # MODLOOP
+          # --------------------------------------------------------
+
+          test -f \
+            "$MOUNT_DIR/boot/modloop-lts"
+
+
+          # --------------------------------------------------------
+          # EFI
+          # --------------------------------------------------------
+
+          test -d \
+            "$MOUNT_DIR/efi"
+
+
+          echo
+          echo "EFI files:"
+
+          find \
+            "$MOUNT_DIR/efi" \
+            -maxdepth 4 \
             -type f \
             -print
 
@@ -1659,6 +1955,7 @@ jobs:
           # APK SIGNATURES
           # --------------------------------------------------------
 
+          echo
           echo "Repository signatures:"
 
           find \
@@ -1669,12 +1966,29 @@ jobs:
             -print
 
 
-          echo "ISO BOOT REPOSITORY VALID."
+          SIGNATURE="$(
+            find \
+              "$MOUNT_DIR/apks/x86_64" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.SIGN.RSA.*' \
+              -print \
+              | head -n 1
+          )"
 
 
-      # ==========================================================
-      # SHA256
-      # ==========================================================
+          test -n "$SIGNATURE"
+
+
+          echo
+          echo "========================================"
+          echo "ISO BOOT REPOSITORY VALID"
+          echo "========================================"
+
+
+      # ============================================================
+      # 19. SHA256
+      # ============================================================
 
       - name: Generate SHA256 checksum
         shell: sh
@@ -1684,16 +1998,16 @@ jobs:
           cd "$ISO_OUT"
 
           sha256sum \
-            "$(basename "$ISO_FILE")" \
+            *.iso \
             > sha256sums.txt
 
           cat \
             sha256sums.txt
 
 
-      # ==========================================================
-      # UPLOAD ARTIFACT
-      # ==========================================================
+      # ============================================================
+      # 20. UPLOAD ARTIFACT
+      # ============================================================
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
@@ -1705,11 +2019,11 @@ jobs:
           retention-days: 14
 
 
-      # ==========================================================
-      # GITHUB RELEASE
-      # ==========================================================
+      # ============================================================
+      # 21. GITHUB RELEASE
+      # ============================================================
 
-      - name: Create GitHub release
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
