@@ -27,16 +27,16 @@ jobs:
 
     steps:
 
-      # ------------------------------------------------------------
+      # ============================================================
       # CHECKOUT
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
+      # ============================================================
       # BUILD DEPENDENCIES
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Install Alpine ISO build dependencies
         shell: sh
@@ -71,9 +71,11 @@ jobs:
             util-linux \
             xorriso
 
-      # ------------------------------------------------------------
+          python3 --version
+
+      # ============================================================
       # APORTS
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Clone Alpine aports
         shell: sh
@@ -89,9 +91,9 @@ jobs:
 
           test -f "$APORTS_DIR/scripts/mkimage.sh"
 
-      # ------------------------------------------------------------
+      # ============================================================
       # PATCH MKIMAGE
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Patch mkimage.sh for GitHub Actions
         shell: sh
@@ -108,9 +110,9 @@ jobs:
 
           grep -n "initdb" "$MKIMAGE" || true
 
-      # ------------------------------------------------------------
+      # ============================================================
       # APK SIGNING
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Configure APK signing key
         shell: sh
@@ -146,25 +148,12 @@ jobs:
           echo "PACKAGER_PUBKEY=$PUBKEY" >> "$GITHUB_ENV"
 
           echo
-          echo "=========================================="
-          echo "APK SIGNING CONFIGURATION"
-          echo "=========================================="
-          echo
-
-          echo "Private key:"
-          ls -l "$PRIVKEY"
-
-          echo
-          echo "Public key:"
-          ls -l "$PUBKEY"
-
-          echo
           echo "APK trusted keys:"
           ls -lah /etc/apk/keys
 
-      # ------------------------------------------------------------
-      # CREATE BUILD DIRECTORIES
-      # ------------------------------------------------------------
+      # ============================================================
+      # BUILD FILES
+      # ============================================================
 
       - name: Generate Sway OS files
         shell: sh
@@ -179,9 +168,9 @@ jobs:
             "$OS_FILES/configs/nwg-dock" \
             "$OS_FILES/installer"
 
-      # ------------------------------------------------------------
-      # SWAY CONFIG
-      # ------------------------------------------------------------
+      # ============================================================
+      # SWAY
+      # ============================================================
 
       - name: Generate Sway configuration
         shell: sh
@@ -243,9 +232,9 @@ jobs:
           exec mako
           EOF
 
-      # ------------------------------------------------------------
+      # ============================================================
       # WAYBAR
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Generate Waybar configuration
         shell: sh
@@ -338,9 +327,9 @@ jobs:
           }
           EOF
 
-      # ------------------------------------------------------------
+      # ============================================================
       # DOCK
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Generate dock configuration
         shell: sh
@@ -353,9 +342,9 @@ jobs:
           thunar
           EOF
 
-      # ------------------------------------------------------------
+      # ============================================================
       # PHASE 1 INSTALLER
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Generate Phase 1 installer
         shell: sh
@@ -379,6 +368,7 @@ jobs:
           class Phase1Window(Gtk.ApplicationWindow):
 
               def __init__(self, app):
+
                   super().__init__(
                       application=app,
                       title="Install Alpine Sway OS"
@@ -686,9 +676,9 @@ jobs:
           chmod +x \
             "$OS_FILES/installer/phase1-installer.py"
 
-      # ------------------------------------------------------------
-      # PHASE 2 OOBE
-      # ------------------------------------------------------------
+      # ============================================================
+      # PHASE 2
+      # ============================================================
 
       - name: Generate Phase 2 OOBE
         shell: sh
@@ -735,13 +725,10 @@ jobs:
                   self.set_child(outer)
 
                   self.stack = Gtk.Stack()
+
                   self.stack.set_vexpand(True)
 
                   outer.append(self.stack)
-
-                  # -----------------------------
-                  # WIFI
-                  # -----------------------------
 
                   wifi = Gtk.Box(
                       orientation=Gtk.Orientation.VERTICAL,
@@ -796,9 +783,7 @@ jobs:
                       lambda _: self.scan_wifi()
                   )
 
-                  buttons.append(
-                      refresh
-                  )
+                  buttons.append(refresh)
 
                   skip = Gtk.Button(
                       label="Skip"
@@ -811,9 +796,7 @@ jobs:
                       )
                   )
 
-                  buttons.append(
-                      skip
-                  )
+                  buttons.append(skip)
 
                   connect = Gtk.Button(
                       label="Connect & Next"
@@ -828,22 +811,14 @@ jobs:
                       self.connect_wifi
                   )
 
-                  buttons.append(
-                      connect
-                  )
+                  buttons.append(connect)
 
-                  wifi.append(
-                      buttons
-                  )
+                  wifi.append(buttons)
 
                   self.stack.add_named(
                       wifi,
                       "wifi"
                   )
-
-                  # -----------------------------
-                  # USER
-                  # -----------------------------
 
                   account = Gtk.Box(
                       orientation=Gtk.Orientation.VERTICAL,
@@ -880,17 +855,9 @@ jobs:
                       False
                   )
 
-                  account.append(
-                      self.host_entry
-                  )
-
-                  account.append(
-                      self.user_entry
-                  )
-
-                  account.append(
-                      self.password_entry
-                  )
+                  account.append(self.host_entry)
+                  account.append(self.user_entry)
+                  account.append(self.password_entry)
 
                   finish = Gtk.Button(
                       label="Finish & Launch Desktop"
@@ -905,9 +872,7 @@ jobs:
                       self.finish
                   )
 
-                  account.append(
-                      finish
-                  )
+                  account.append(finish)
 
                   self.stack.add_named(
                       account,
@@ -958,9 +923,7 @@ jobs:
 
                           if ssid and ssid not in seen:
 
-                              seen.add(
-                                  ssid
-                              )
+                              seen.add(ssid)
 
                               self.wifi_combo.append_text(
                                   ssid
@@ -976,7 +939,10 @@ jobs:
               def connect_wifi(self, _button):
 
                   ssid = self.wifi_combo.get_active_text()
-                  password = self.wifi_password.get_text()
+
+                  password = (
+                      self.wifi_password.get_text()
+                  )
 
                   if not ssid:
                       return
@@ -1075,9 +1041,9 @@ jobs:
           chmod +x \
             "$OS_FILES/installer/phase2-oobe.py"
 
-      # ------------------------------------------------------------
+      # ============================================================
       # IMAGE PROFILE
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Generate Alpine Sway image profile
         shell: sh
@@ -1138,9 +1104,14 @@ jobs:
                   networkmanager
                   networkmanager-wifi
                   wpa_supplicant
+
+                  # Python runtime
                   python3
                   py3-gobject3
+
+                  # GTK
                   gtk4.0
+
                   grim
                   slurp
                   wl-clipboard
@@ -1158,9 +1129,9 @@ jobs:
           chmod +x \
             "$APORTS_DIR/scripts/mkimg.sway.sh"
 
-      # ------------------------------------------------------------
-      # ALPINE OVERLAY
-      # ------------------------------------------------------------
+      # ============================================================
+      # OVERLAY
+      # ============================================================
 
       - name: Generate Alpine overlay
         shell: sh
@@ -1210,7 +1181,7 @@ jobs:
 
 
           # ----------------------------------------------------------
-          # CONFIGURATION DIRECTORIES
+          # CONFIG
           # ----------------------------------------------------------
 
           mkdir -p \
@@ -1229,14 +1200,9 @@ jobs:
 
 
           # ----------------------------------------------------------
-          # IMPORTANT:
-          # DO NOT START SWAY FROM .profile
+          # ROOT PROFILE
           #
-          # This prevents the broken:
-          #
-          # dbus-run-session sway
-          #
-          # login/session interaction.
+          # DO NOT START SWAY HERE.
           # ----------------------------------------------------------
 
           makefile root:root 0644 "$tmp/root/.profile" <<'PROFILE'
@@ -1245,6 +1211,10 @@ jobs:
           export MOZ_ENABLE_WAYLAND=1
           PROFILE
 
+
+          # ----------------------------------------------------------
+          # USER PROFILE
+          # ----------------------------------------------------------
 
           makefile root:root 0644 "$tmp/etc/skel/.profile" <<'PROFILE'
           export XDG_CURRENT_DESKTOP=sway
@@ -1263,7 +1233,7 @@ jobs:
 
 
           # ----------------------------------------------------------
-          # INSTALLER FILES
+          # INSTALLER
           # ----------------------------------------------------------
 
           mkdir -p \
@@ -1298,11 +1268,8 @@ jobs:
 
 
           if [ -z "$TARGET_DISK" ]; then
-
               echo "No target disk specified."
-
               exit 1
-
           fi
 
 
@@ -1324,7 +1291,6 @@ jobs:
 
 
           echo "Target disk: $TARGET_DISK"
-
           echo "Expected root partition: $ROOT_PART"
 
 
@@ -1380,8 +1346,6 @@ jobs:
               /mnt/usr/local/bin/phase2-oobe.py
 
 
-          # Create temporary OEM account.
-
           chroot /mnt \
               adduser \
               -D \
@@ -1418,10 +1382,6 @@ jobs:
               > /mnt/etc/sudoers.d/oem
 
 
-          # ----------------------------------------------------------
-          # INSTALLED USER SWAY CONFIG
-          # ----------------------------------------------------------
-
           mkdir -p \
               /mnt/home/oem/.config/sway
 
@@ -1450,13 +1410,12 @@ jobs:
           umount /mnt
 
 
-          echo
           echo "Phase 1 installation completed."
           PHASE1
 
 
           # ----------------------------------------------------------
-          # FINALIZE OOBE
+          # FINALIZE
           # ----------------------------------------------------------
 
           makefile root:root 0755 "$tmp/usr/local/bin/finalize-oobe" <<'PHASE2'
@@ -1470,11 +1429,8 @@ jobs:
 
 
           if [ -z "$NEW_USER" ] || [ -z "$NEW_PASS" ]; then
-
               echo "Username and password are required."
-
               exit 1
-
           fi
 
 
@@ -1569,7 +1525,7 @@ jobs:
 
 
           # ----------------------------------------------------------
-          # OPENRC SERVICES
+          # OPENRC
           # ----------------------------------------------------------
 
           rc_add devfs sysinit
@@ -1590,7 +1546,7 @@ jobs:
 
 
           # ----------------------------------------------------------
-          # CREATE APKOVL
+          # APKOVL
           # ----------------------------------------------------------
 
           tar \
@@ -1607,49 +1563,38 @@ jobs:
           chmod +x \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
-      # ------------------------------------------------------------
-      # VALIDATION
-      # ------------------------------------------------------------
+      # ============================================================
+      # VALIDATE
+      # ============================================================
 
       - name: Validate generated files
         shell: sh
         run: |
           set -eux
 
-          test -f \
-            "$APORTS_DIR/scripts/mkimg.sway.sh"
-
-          test -f \
-            "$APORTS_DIR/scripts/genapkovl-sway.sh"
-
-          test -f \
-            "$OS_FILES/installer/phase1-installer.py"
-
-          test -f \
-            "$OS_FILES/installer/phase2-oobe.py"
-
-
           sh -n \
             "$APORTS_DIR/scripts/mkimg.sway.sh"
-
 
           sh -n \
             "$APORTS_DIR/scripts/genapkovl-sway.sh"
 
-
           python3 -m py_compile \
             "$OS_FILES/installer/phase1-installer.py"
-
 
           python3 -m py_compile \
             "$OS_FILES/installer/phase2-oobe.py"
 
+          test -x \
+            "$OS_FILES/installer/phase1-installer.py"
 
-          echo "Generated files validated."
+          test -x \
+            "$OS_FILES/installer/phase2-oobe.py"
 
-      # ------------------------------------------------------------
+          echo "Validation passed."
+
+      # ============================================================
       # VERIFY SIGNING
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Verify signing configuration
         shell: sh
@@ -1662,18 +1607,11 @@ jobs:
           test -n "$PACKAGER_PUBKEY"
           test -f "$PACKAGER_PUBKEY"
 
-          echo "Private key:"
-          ls -l "$PACKAGER_PRIVKEY"
-
-          echo "Public key:"
-          ls -l "$PACKAGER_PUBKEY"
-
-          echo "APK keys installed:"
           ls -lah /etc/apk/keys
 
-      # ------------------------------------------------------------
-      # BUILD ISO
-      # ------------------------------------------------------------
+      # ============================================================
+      # BUILD
+      # ============================================================
 
       - name: Build Alpine Sway OS ISO
         shell: sh
@@ -1693,19 +1631,16 @@ jobs:
             --repository https://dl-cdn.alpinelinux.org/alpine/edge/community \
             --profile sway
 
-      # ------------------------------------------------------------
-      # INSPECT ISO
-      # ------------------------------------------------------------
+      # ============================================================
+      # INSPECT OUTPUT
+      # ============================================================
 
       - name: Inspect ISO output
         shell: sh
         run: |
           set -eux
 
-          echo "ISO output directory:"
-
           ls -lah "$ISO_OUT"
-
 
           ISO_FILE="$(
             find "$ISO_OUT" \
@@ -1716,31 +1651,18 @@ jobs:
               | head -n 1
           )"
 
-
           test -n "$ISO_FILE"
-
           test -f "$ISO_FILE"
-
-
-          echo "ISO:"
-          echo "$ISO_FILE"
-
-
-          echo "ISO size:"
-
-          du -h "$ISO_FILE"
-
-
-          echo "ISO type:"
 
           file "$ISO_FILE"
 
+          du -h "$ISO_FILE"
 
           echo "ISO_FILE=$ISO_FILE" >> "$GITHUB_ENV"
 
-      # ------------------------------------------------------------
+      # ============================================================
       # VERIFY ISO
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Verify ISO boot structure and APK trust
         shell: sh
@@ -1749,73 +1671,66 @@ jobs:
 
           test -f "$ISO_FILE"
 
-
           MOUNT_DIR="/tmp/iso-check"
 
-
           rm -rf "$MOUNT_DIR"
-
           mkdir -p "$MOUNT_DIR"
-
 
           mount \
             -o loop,ro \
             "$ISO_FILE" \
             "$MOUNT_DIR"
 
-
           cleanup() {
-
-              umount \
-                "$MOUNT_DIR" \
-                2>/dev/null \
-                || true
-
+              umount "$MOUNT_DIR" 2>/dev/null || true
           }
-
 
           trap cleanup EXIT
 
-
-          echo "ISO ROOT"
-
-          ls -lah "$MOUNT_DIR"
-
-
           # ----------------------------------------------------------
-          # APK
+          # BOOT FILES
           # ----------------------------------------------------------
 
-          test -d \
-            "$MOUNT_DIR/apks"
+          test -d "$MOUNT_DIR/apks"
+          test -d "$MOUNT_DIR/apks/x86_64"
 
-          test -d \
-            "$MOUNT_DIR/apks/x86_64"
+          test -d "$MOUNT_DIR/boot"
+          test -d "$MOUNT_DIR/efi"
 
-          test -f \
-            "$MOUNT_DIR/apks/.boot_repository"
+          test -f "$MOUNT_DIR/apks/.boot_repository"
 
           test -f \
             "$MOUNT_DIR/apks/x86_64/APKINDEX.tar.gz"
 
+          test -f \
+            "$MOUNT_DIR/boot/vmlinuz-lts"
+
+          test -f \
+            "$MOUNT_DIR/boot/initramfs-lts"
+
+          test -f \
+            "$MOUNT_DIR/boot/modloop-lts"
+
+          test -f \
+            "$MOUNT_DIR/boot/syslinux/isolinux.bin"
+
+          test -f \
+            "$MOUNT_DIR/boot/syslinux/syslinux.cfg"
+
+          test -f \
+            "$MOUNT_DIR/efi/boot/bootx64.efi"
 
           echo
-          echo "Boot repository:"
-
-          cat \
-            "$MOUNT_DIR/apks/.boot_repository"
-
+          echo "=========================================="
+          echo "ISO BOOT STRUCTURE PASSED"
+          echo "=========================================="
 
           echo
-          echo "APK directory:"
-
-          ls -lah \
-            "$MOUNT_DIR/apks/x86_64"
-
+          echo "APK repository:"
+          cat "$MOUNT_DIR/apks/.boot_repository"
 
           echo
           echo "APK signatures:"
-
           find \
             "$MOUNT_DIR/apks/x86_64" \
             -maxdepth 1 \
@@ -1824,55 +1739,9 @@ jobs:
             -print \
             || true
 
-
-          # ----------------------------------------------------------
-          # BOOT
-          # ----------------------------------------------------------
-
-          test -d \
-            "$MOUNT_DIR/boot"
-
-
-          test -d \
-            "$MOUNT_DIR/efi"
-
-
-          test -f \
-            "$MOUNT_DIR/boot/vmlinuz-lts"
-
-
-          test -f \
-            "$MOUNT_DIR/boot/initramfs-lts"
-
-
-          test -f \
-            "$MOUNT_DIR/boot/modloop-lts"
-
-
-          test -f \
-            "$MOUNT_DIR/boot/syslinux/isolinux.bin"
-
-
-          test -f \
-            "$MOUNT_DIR/boot/syslinux/syslinux.cfg"
-
-
-          # ----------------------------------------------------------
-          # UEFI
-          # ----------------------------------------------------------
-
-          test -f \
-            "$MOUNT_DIR/efi/boot/bootx64.efi"
-
-
-          echo
-          echo "=========================================="
-          echo "ISO VERIFICATION PASSED"
-          echo "=========================================="
-
-      # ------------------------------------------------------------
+      # ============================================================
       # SHA256
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Generate SHA256 checksum
         shell: sh
@@ -1887,9 +1756,9 @@ jobs:
 
           cat sha256sums.txt
 
-      # ------------------------------------------------------------
+      # ============================================================
       # ARTIFACT
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
@@ -1900,9 +1769,9 @@ jobs:
             /workspace/out/sha256sums.txt
           retention-days: 14
 
-      # ------------------------------------------------------------
+      # ============================================================
       # RELEASE
-      # ------------------------------------------------------------
+      # ============================================================
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
