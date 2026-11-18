@@ -192,7 +192,7 @@ jobs:
           vim
           pciutils
           usbutils
-          
+
           libreoffice
           chromium
           thunar
@@ -204,7 +204,6 @@ jobs:
           flatpak
           xdg-desktop-portal
           xdg-desktop-portal-wlr
-          steam-devices
           wl-clipboard
           grim
           slurp
@@ -428,52 +427,87 @@ jobs:
           [ -b "$DISK" ] || { echo "ERROR: $DISK is not a block device"; exit 1; }
 
           T=/mnt/target
+          SETUP_LOG=/tmp/alpine-setup-disk.log
 
           cleanup() {
-              for m in dev proc sys; do umount -l "$T/$m" 2>/dev/null || true; done
-              umount "$T/boot/efi" 2>/dev/null || true
-              umount "$T/boot" 2>/dev/null || true
-              umount "$T" 2>/dev/null || true
+              sync 2>/dev/null || true
+              for m in "$T/dev" "$T/proc" "$T/sys"; do
+                  umount -l "$m" 2>/dev/null || true
+              done
+              umount -l "$T/boot/efi" 2>/dev/null || true
+              umount -l "$T/boot" 2>/dev/null || true
+              umount -l "$T" 2>/dev/null || true
           }
           trap cleanup EXIT
 
           echo "==> [1/5] Partitioning $DISK and installing base system"
           export ERASE_DISKS="$DISK"
-
           export BOOTLOADER=grub
-
           export DISKLABEL=gpt
-
-          export USE_EFI=1 # Prefer UEFI; setup-disk falls back cleanly on pure BIOS
-
+          export USE_EFI=1
           export ROOTFS=ext4
-
           export BOOTFS=vfat
-          setup-disk -m sys -s 0 "$DISK"
+
+          echo "==> setup-disk configuration"
+          echo "    DISK=$DISK"
+          echo "    BOOTLOADER=$BOOTLOADER"
+          echo "    DISKLABEL=$DISKLABEL"
+          echo "    USE_EFI=$USE_EFI"
+          echo "    ROOTFS=$ROOTFS"
+          echo "    BOOTFS=$BOOTFS"
+
+          rm -f "$SETUP_LOG"
+          if ! setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1; then
+              echo "===== setup-disk FAILED ====="
+              cat "$SETUP_LOG"
+              echo "===== end setup-disk log ====="
+              exit 1
+          fi
+          cat "$SETUP_LOG"
+          echo "==> setup-disk completed successfully"
 
           echo "==> [2/5] Mounting installed system"
-          ROOT_PART="$(lsblk -brnpo NAME,FSTYPE,SIZE "$DISK" \
-              | awk '$2=="ext4" {print $3, $1}' | sort -n | tail -n1 | cut -d' ' -f2)"
-          [ -n "$ROOT_PART" ] || { echo "ERROR: could not find root partition"; exit 1; }
+          ROOT_PART="$(lsblk -brnpo NAME,FSTYPE,SIZE "$DISK" | awk '$2=="ext4" {print $3, $1}' | sort -n | tail -n1 | cut -d' ' -f2)"
+          [ -n "$ROOT_PART" ] || {
+              echo "ERROR: could not find root ext4 partition on $DISK"
+              lsblk -f "$DISK" || true
+              exit 1
+          }
           echo "Root partition: $ROOT_PART"
 
           mkdir -p "$T"
           mount "$ROOT_PART" "$T"
-          mount --bind /dev "$T/dev"
+          mkdir -p "$T/dev" "$T/proc" "$T/sys"
+          mount --rbind /dev "$T/dev"
+          mount --make-rslave "$T/dev"
           mount -t proc proc "$T/proc"
           mount -t sysfs sys "$T/sys"
 
           echo "==> [3/5] Installing desktop packages"
           sed 's/#.*//' /etc/apk/world | grep -v '^[[:space:]]*$' > /tmp/install-world
-          # shellcheck disable=SC2046
           apk --root "$T" --repositories-file /etc/apk/repositories add \
               $(tr '\n' ' ' < /tmp/install-world)
+
+          echo "==> Installing Flatpak/Steam support"
+          if chroot "$T" flatpak --version >/dev/null 2>&1; then
+              if chroot "$T" flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
+                  echo "==> Installing Steam from Flathub"
+                  if ! chroot "$T" flatpak install -y --system flathub com.valvesoftware.Steam; then
+                      echo "WARNING: Steam installation failed during the offline/live installation stage."
+                      echo "         Flatpak and the Flathub remote are installed; Steam can be installed later."
+                  fi
+              else
+                  echo "WARNING: Could not add Flathub; Steam was not installed."
+              fi
+          fi
 
           echo "==> [4/5] Applying configuration"
           mkdir -p "$T/etc/sway" "$T/etc/xdg/waybar" "$T/etc/NetworkManager" "$T/etc/profile.d"
 
-          # The installed system must not relaunch the installer
-          grep -v -e 'phase1-installer' -e 'org.alpineos.installer' /root/.config/sway/config > "$T/etc/sway/config" 
+          # The live Sway config lives under root's home, not /etc/sway.
+          # Remove only the live-installer launch lines from the installed system.
+          grep -v -e 'phase1-installer' -e 'org.alpineos.installer' \
+              /root/.config/sway/config > "$T/etc/sway/config"
           cp /etc/xdg/waybar/config "$T/etc/xdg/waybar/config"
           cp /etc/xdg/waybar/style.css "$T/etc/xdg/waybar/style.css"
           cp /etc/NetworkManager/NetworkManager.conf "$T/etc/NetworkManager/NetworkManager.conf"
@@ -495,7 +529,9 @@ jobs:
           for s in mount-ro killprocs savecache; do add_svc "$s" shutdown; done
 
           echo "==> [5/5] Creating user $INSTALL_USER"
-          chroot "$T" adduser -D -s /bin/bash "$INSTALL_USER"
+          if ! chroot "$T" id "$INSTALL_USER" >/dev/null 2>&1; then
+              chroot "$T" adduser -D -s /bin/bash "$INSTALL_USER"
+          fi
           printf '%s:%s\n' "$INSTALL_USER" "$INSTALL_PASS" | chroot "$T" chpasswd -c sha512
           for g in wheel video input audio seat netdev plugdev; do
               chroot "$T" addgroup "$INSTALL_USER" "$g" >/dev/null 2>&1 || true
@@ -504,14 +540,19 @@ jobs:
           mkdir -p "$T/etc/doas.d"
           echo "permit persist :wheel" > "$T/etc/doas.d/wheel.conf"
 
-          # Start Sway automatically when the user logs in on tty1
           cat > "$T/home/$INSTALL_USER/.profile" <<'PROFILE'
           if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = "/dev/tty1" ]; then
               export LIBSEAT_BACKEND=seatd
+              export XDG_CURRENT_DESKTOP=sway
+              export XDG_SESSION_TYPE=wayland
               exec dbus-run-session sway
           fi
           PROFILE
           chroot "$T" chown "$INSTALL_USER:$INSTALL_USER" "/home/$INSTALL_USER/.profile"
+
+          # Make sure Steam's desktop entry and Flatpak environment are available to the user.
+          mkdir -p "$T/home/$INSTALL_USER/.var"
+          chroot "$T" chown -R "$INSTALL_USER:$INSTALL_USER" "/home/$INSTALL_USER/.var" 2>/dev/null || true
 
           sync
           echo "==> Installation complete"
@@ -885,7 +926,9 @@ jobs:
           # Check every package individually so ALL missing names are reported at once.
           missing=""
           while read -r pkg; do
-            [ -n "$pkg" ] || continue
+            case "$pkg" in
+              ""|\#*) continue ;;
+            esac
             if ! apk add --simulate "$pkg" > /dev/null 2>&1; then
               echo "MISSING: $pkg"
               missing="$missing $pkg"
@@ -921,11 +964,20 @@ jobs:
           grep -Fx 'adwaita-icon-theme' /tmp/sway-packages.txt
           grep -Fx 'libinput' /tmp/sway-packages.txt
           grep -Fx 'libinput-tools' /tmp/sway-packages.txt
+          grep -Fx 'libreoffice' /tmp/sway-packages.txt
+          grep -Fx 'chromium' /tmp/sway-packages.txt
+          grep -Fx 'thunar' /tmp/sway-packages.txt
+          grep -Fx 'flatpak' /tmp/sway-packages.txt
+          grep -Fx 'xdg-desktop-portal' /tmp/sway-packages.txt
+          grep -Fx 'xdg-desktop-portal-wlr' /tmp/sway-packages.txt
           grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/root/.config/sway/config
           grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/root/.config/sway/config
 
-          grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend || true
+          grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+          grep -F 'setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+          grep -F 'com.valvesoftware.Steam' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+
           python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
       - name: Build Alpine ISO
