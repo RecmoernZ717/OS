@@ -994,7 +994,7 @@ jobs:
 
           grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
-          grep -F 'setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+          grep -F 'setup-disk -m sys -b grub -s 0 "$DISK" >"$SETUP_LOG" 2>&1' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F 'SETUP_RC=$?' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F 'com.valvesoftware.Steam' /tmp/sway-overlay/usr/local/sbin/phase1-backend
 
