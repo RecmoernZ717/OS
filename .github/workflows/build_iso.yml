@@ -461,7 +461,7 @@ jobs:
 
           rm -f "$SETUP_LOG"
           set +e
-          setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1
+          setup-disk -m sys -b grub -s 0 "$DISK" >"$SETUP_LOG" 2>&1
           SETUP_RC=$?
           set -e
 
