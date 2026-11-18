@@ -456,13 +456,32 @@ jobs:
           echo "    ROOTFS=$ROOTFS"
           echo "    BOOTFS=$BOOTFS"
 
+          echo "==> Checking setup-disk command"
+          command -v setup-disk
+
           rm -f "$SETUP_LOG"
-          if ! setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1; then
+          set +e
+          setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1
+          SETUP_RC=$?
+          set -e
+
+          echo "==> setup-disk exit code: $SETUP_RC"
+
+          if [ "$SETUP_RC" -ne 0 ]; then
               echo "===== setup-disk FAILED ====="
-              cat "$SETUP_LOG"
-              echo "===== end setup-disk log ====="
-              exit 1
+              if [ -s "$SETUP_LOG" ]; then
+                  cat "$SETUP_LOG"
+              else
+                  echo "setup-disk produced no output."
+              fi
+              echo "===== block devices ====="
+              lsblk -f "$DISK" || true
+              echo "===== mounts ====="
+              mount || true
+              echo "===== end setup-disk diagnostics ====="
+              exit "$SETUP_RC"
           fi
+
           cat "$SETUP_LOG"
           echo "==> setup-disk completed successfully"
 
@@ -976,6 +995,7 @@ jobs:
           grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F 'setup-disk -m sys -s 0 "$DISK" >"$SETUP_LOG" 2>&1' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+          grep -F 'SETUP_RC=$?' /tmp/sway-overlay/usr/local/sbin/phase1-backend
           grep -F 'com.valvesoftware.Steam' /tmp/sway-overlay/usr/local/sbin/phase1-backend
 
           python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
