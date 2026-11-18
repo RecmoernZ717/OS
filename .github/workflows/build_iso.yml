@@ -926,8 +926,8 @@ jobs:
           grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/root/.config/sway/config
 
           grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend || true
-grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
-python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
+          grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+          python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
       - name: Build Alpine ISO
         shell: sh
