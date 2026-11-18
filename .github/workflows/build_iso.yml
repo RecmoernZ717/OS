@@ -192,8 +192,7 @@ jobs:
           vim
           pciutils
           usbutils
-
-          # Desktop applications
+          
           libreoffice
           chromium
           thunar
