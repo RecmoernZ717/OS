@@ -192,6 +192,23 @@ jobs:
           vim
           pciutils
           usbutils
+
+          # Desktop applications
+          libreoffice
+          chromium
+          thunar
+          file-roller
+          evince
+          mpv
+          gimp
+          pavucontrol
+          flatpak
+          xdg-desktop-portal
+          xdg-desktop-portal-wlr
+          steam-devices
+          wl-clipboard
+          grim
+          slurp
           EOF
 
           # Drop blank lines
@@ -423,6 +440,16 @@ jobs:
 
           echo "==> [1/5] Partitioning $DISK and installing base system"
           export ERASE_DISKS="$DISK"
+
+          export BOOTLOADER=grub
+
+          export DISKLABEL=gpt
+
+          export USE_EFI=1 # Prefer UEFI; setup-disk falls back cleanly on pure BIOS
+
+          export ROOTFS=ext4
+
+          export BOOTFS=vfat
           setup-disk -m sys -s 0 "$DISK"
 
           echo "==> [2/5] Mounting installed system"
@@ -447,7 +474,7 @@ jobs:
           mkdir -p "$T/etc/sway" "$T/etc/xdg/waybar" "$T/etc/NetworkManager" "$T/etc/profile.d"
 
           # The installed system must not relaunch the installer
-          grep -v -e 'phase1-installer' -e 'org.alpineos.installer' /etc/sway/config > "$T/etc/sway/config"
+          grep -v -e 'phase1-installer' -e 'org.alpineos.installer' /root/.config/sway/config > "$T/etc/sway/config" 
           cp /etc/xdg/waybar/config "$T/etc/xdg/waybar/config"
           cp /etc/xdg/waybar/style.css "$T/etc/xdg/waybar/style.css"
           cp /etc/NetworkManager/NetworkManager.conf "$T/etc/NetworkManager/NetworkManager.conf"
@@ -898,7 +925,9 @@ jobs:
           grep -F 'seat seat0 xcursor_theme Adwaita 24' /tmp/sway-overlay/root/.config/sway/config
           grep -F 'seat seat0 hide_cursor 0' /tmp/sway-overlay/root/.config/sway/config
 
-          python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
+          grep -F 'export BOOTFS=vfat' /tmp/sway-overlay/usr/local/sbin/phase1-backend || true
+grep -F '/root/.config/sway/config' /tmp/sway-overlay/usr/local/sbin/phase1-backend
+python3 -m py_compile /tmp/sway-overlay/usr/local/bin/phase1-installer.py
 
       - name: Build Alpine ISO
         shell: sh
